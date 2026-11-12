@@ -34,6 +34,7 @@ describe("AI Studio Worker", () => {
       service: "ai-studio-api",
       modelConfigured: false,
       qwenConfigured: false,
+      githubConfigured: false,
       authConfigured: false
     });
   });
@@ -276,6 +277,82 @@ describe("AI Studio Worker", () => {
     }), env);
     assert.equal(response.status, 503);
     assert.match((await response.json()).error, /Qwen не подключён/);
+  });
+
+
+  it("requires a configured GitHub token for repository access", async () => {
+    const cookie = await getSessionCookie();
+    const response = await worker.fetch(new Request("https://studio.test/api/github/tree"), {
+      ...env,
+      GITHUB_TOKEN: ""
+    });
+    assert.equal(response.status, 401);
+    const authenticated = await worker.fetch(new Request("https://studio.test/api/github/tree", {
+      headers: { cookie }
+    }), { ...env, GITHUB_TOKEN: "" });
+    assert.equal(authenticated.status, 503);
+    assert.match((await authenticated.json()).error, /GITHUB_TOKEN/);
+  });
+
+  it("never allows writes to main", async () => {
+    const cookie = await getSessionCookie();
+    const response = await worker.fetch(new Request("https://studio.test/api/github/file", {
+      method: "PUT",
+      headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+      body: JSON.stringify({ path: "README.md", branch: "main", content: "unsafe", sha: "a".repeat(40) })
+    }), { ...env, GITHUB_TOKEN: "test-token" });
+    assert.equal(response.status, 403);
+  });
+
+  it("rejects path traversal before calling GitHub", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => { throw new Error("GitHub should not be called"); };
+    try {
+      const cookie = await getSessionCookie();
+      const response = await worker.fetch(new Request("https://studio.test/api/github/file?path=..%2Fsecret.txt&ref=main", {
+        headers: { cookie }
+      }), { ...env, GITHUB_TOKEN: "test-token" });
+      assert.equal(response.status, 400);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("commits file updates only to an AI Studio branch", async () => {
+    const originalFetch = globalThis.fetch;
+    let requestedUrl = "";
+    let requestBody = null;
+    globalThis.fetch = async (url, options) => {
+      requestedUrl = String(url);
+      requestBody = JSON.parse(options.body);
+      return new Response(JSON.stringify({
+        content: { sha: "b".repeat(40) },
+        commit: { sha: "c".repeat(40) }
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    try {
+      const cookie = await getSessionCookie();
+      const response = await worker.fetch(new Request("https://studio.test/api/github/file", {
+        method: "PUT",
+        headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+        body: JSON.stringify({
+          path: "src/example.js",
+          branch: "ai-studio/task-1",
+          content: "export const ready = true;",
+          sha: "a".repeat(40),
+          message: "Update example"
+        })
+      }), { ...env, GITHUB_TOKEN: "test-token" });
+      assert.equal(response.status, 200);
+      const result = await response.json();
+      assert.equal(result.ok, true);
+      assert.equal(result.commit, "c".repeat(40));
+      assert.equal(requestBody.branch, "ai-studio/task-1");
+      assert.equal(requestBody.sha, "a".repeat(40));
+      assert.match(requestedUrl, /contents\/src\/example\.js$/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("returns a rate-limit message when Gemini responds with 429", async () => {
