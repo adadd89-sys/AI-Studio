@@ -34,6 +34,7 @@ describe("AI Studio Worker", () => {
       service: "ai-studio-api",
       modelConfigured: false,
       qwenConfigured: false,
+      openrouterConfigured: false,
       githubConfigured: false,
       authConfigured: false
     });
@@ -413,6 +414,59 @@ describe("AI Studio Worker", () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+
+
+  it("keeps lightweight chat separate from the development workflow", async () => {
+    const cookie = await getSessionCookie();
+    let requestedModel = "";
+    const response = await worker.fetch(new Request("https://studio.test/api/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+      body: JSON.stringify({
+        message: "Привет! Давай просто поговорим.",
+        history: [{ role: "user", content: "Предыдущая реплика" }],
+        teamSettings: { mode: "chat", intensity: 10, agents: { gemini: false, qwen: true, gemma: false, north: false } }
+      })
+    }), {
+      ...env,
+      AI: { run: async (model, input) => {
+        requestedModel = model;
+        assert.equal(input.messages.at(-1).content, "Привет! Давай просто поговорим.");
+        return { response: "Привет! Конечно, давай." };
+      } }
+    });
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.equal(result.agent, "qwen");
+    assert.equal(result.reply, "Привет! Конечно, давай.");
+    assert.equal(result.usage.requests, 1);
+    assert.equal(requestedModel, "@cf/qwen/qwen3.8-27b");
+  });
+
+  it("does not contact a disabled agent in lightweight chat", async () => {
+    const cookie = await getSessionCookie();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => { throw new Error("Disabled Gemini must not be called"); };
+    try {
+      const response = await worker.fetch(new Request("https://studio.test/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+        body: JSON.stringify({ message: "Тест", teamSettings: { mode: "chat", agents: { gemini: false, qwen: true, gemma: false, north: false } } })
+      }), { ...env, AI: { run: async () => ({ response: "Ответ от Qwen." }) } });
+      assert.equal(response.status, 200);
+      assert.equal((await response.json()).agent, "qwen");
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
+  it("rejects lightweight chat without an enabled agent", async () => {
+    const cookie = await getSessionCookie();
+    const response = await worker.fetch(new Request("https://studio.test/api/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+      body: JSON.stringify({ message: "Тест", teamSettings: { agents: { gemini: false, qwen: false, gemma: false, north: false } } })
+    }), env);
+    assert.equal(response.status, 400);
   });
 
   it("rejects autonomous execution without a session", async () => {
