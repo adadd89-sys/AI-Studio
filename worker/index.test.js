@@ -106,7 +106,7 @@ describe("AI Studio Worker", () => {
       const response = await worker.fetch(planRequest(cookie), env);
       assert.equal(response.status, 200);
       const result = await response.json();
-      assert.equal(result.model, "gemini-2.5-flash");
+      assert.equal(result.model, "gemini-3.8-flash");
       assert.equal(result.plan.steps.length, 3);
     } finally {
       globalThis.fetch = originalFetch;
