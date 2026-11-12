@@ -80,7 +80,7 @@ function App() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Не удалось составить план.');
-      setLastPlan({ title: value, ...data.plan, model: data.model });
+      setLastPlan({ title: value, ...data.plan, model: data.model, primaryModel: data.primaryModel || data.model, fallbackUsed: Boolean(data.fallbackUsed) });
       setTasks(current => [{ id: Date.now(), title: value, status: 'План готов', time: 'Только что' }, ...current]);
       setTask('');
       setActive('Процессы');
@@ -147,7 +147,8 @@ function App() {
             </form>
             {taskError && <div className="task-error" role="alert">{taskError}</div>}
             {lastPlan && <div className="generated-plan">
-              <div className="plan-header"><div><span className="eyebrow">ПЛАН ОТ GEMINI</span><h3>{lastPlan.summary}</h3></div><span className="plan-model">{lastPlan.model}</span></div>
+              <div className="plan-header"><div><span className="eyebrow">ПЛАН ОТ GEMINI</span><h3>{lastPlan.summary}</h3></div><div className="plan-model-stack"><span className="plan-model">{lastPlan.model}</span><span className={lastPlan.fallbackUsed ? 'model-route fallback' : 'model-route'}>{lastPlan.fallbackUsed ? 'Резервное переключение' : 'Основная модель'}</span></div></div>
+              <div className={lastPlan.fallbackUsed ? 'model-info fallback' : 'model-info'}>{lastPlan.fallbackUsed ? <>Основная модель <strong>{lastPlan.primaryModel}</strong> была недоступна. Ответ получен от резервной модели <strong>{lastPlan.model}</strong>.</> : <>Запрос выполнен основной моделью <strong>{lastPlan.model}</strong>. Резервная модель не потребовалась.</>}</div>
               <ol>{lastPlan.steps.map((step, index) => <li key={index}>{step}</li>)}</ol>
               {lastPlan.risks?.length > 0 && <div className="plan-notes"><strong>Риски для проверки</strong>{lastPlan.risks.map((risk, index) => <span key={index}>{risk}</span>)}</div>}
               {lastPlan.questions?.length > 0 && <div className="plan-notes"><strong>Нужно уточнить</strong>{lastPlan.questions.map((question, index) => <span key={index}>{question}</span>)}</div>}
