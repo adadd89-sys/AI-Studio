@@ -151,3 +151,11 @@
 .usage-history span,.usage-history small{font-size:8px;color:#818b9c}
 .usage-history strong{font-size:10px;line-height:1.5;color:#d7dce7;overflow-wrap:anywhere}
 @media(max-width:650px){.mode-options{grid-template-columns:1fr}.mode-option{grid-template-columns:20px 1fr;align-items:center}.mode-option span{grid-column:2}.usage-metrics{grid-template-columns:1fr}.usage-metrics article{grid-template-columns:1fr auto;align-items:center}.usage-metrics article small{grid-column:1/-1}.settings-title{align-items:flex-start}}
+
+
+.chat-thread{display:grid;gap:10px;margin-top:14px;max-height:420px;overflow:auto}
+.chat-message{max-width:88%;padding:10px 12px;border:1px solid #303747;border-radius:10px;background:#141923}
+.chat-message.user{justify-self:end;border-color:#49416e;background:#211f32}
+.chat-message>span{display:block;margin-bottom:5px;color:#a99bf0;font-size:8px;font-weight:700}
+.chat-message p{margin:0;color:#d4d9e5;font-size:10px;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere}
+.chat-message.user p{color:#e5e0ff}
