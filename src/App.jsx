@@ -290,7 +290,7 @@ function App() {
           if (response.ok) { if (active) setAuthState('authenticated'); return; }
         } catch { /* Fall back to the existing password login. */ }
       }
-      if (active) setAuthState(health.authConfigured ? 'login' : 'setup');
+      if (active) setAuthState(health.passwordAuthConfigured ? 'login' : health.telegramAuthConfigured ? 'error' : 'setup');
     }).catch(() => { if (active) { setGeminiHealth({ ok: false, modelConfigured: false }); setAuthState('error'); } });
     return () => { active = false; };
   }, []);
@@ -419,7 +419,7 @@ function App() {
   const trackedRequests = visibleUsage.reduce((sum, item) => sum + (Number.isFinite(item.requests) ? item.requests : (item.agents?.length || 0)), 0);
   const trackedNeurons = visibleUsage.reduce((sum, item) => sum + (Number.isFinite(item.neurons) ? item.neurons : 0), 0);
   if (authState !== 'authenticated') {
-    return <div className="login-screen"><form className="login-card" onSubmit={login}><div className="brand-mark"><BrainCircuit size={22} /></div><div className="eyebrow">ЗАЩИЩЁННЫЙ ДОСТУП</div><h1>AI Studio</h1><p>{authState === 'checking' ? 'Проверяем авторизацию…' : authState === 'setup' ? 'Авторизация ещё не настроена. Добавьте APP_PASSWORD и SESSION_SECRET в секреты Cloudflare Worker.' : authState === 'error' ? 'Не удалось связаться с сервером. Обновите страницу позже.' : 'Введите личный пароль, чтобы открыть рабочее пространство.'}</p>{authState === 'login' && <><input type="password" autoComplete="current-password" value={loginPassword} onChange={event => setLoginPassword(event.target.value)} placeholder="Пароль доступа" /><button className="primary-button" type="submit" disabled={!loginPassword || isLoggingIn}>{isLoggingIn ? 'Входим…' : 'Войти'} <Send size={15} /></button></>}{loginError && <div className="task-error">{loginError}</div>}</form></div>;
+    return <div className="login-screen"><form className="login-card" onSubmit={login}><div className="brand-mark"><BrainCircuit size={22} /></div><div className="eyebrow">ЗАЩИЩЁННЫЙ ДОСТУП</div><h1>AI Studio</h1><p>{authState === 'checking' ? 'Проверяем авторизацию…' : authState === 'setup' ? 'Авторизация ещё не настроена. Добавьте APP_PASSWORD и SESSION_SECRET в секреты Cloudflare Worker.' : authState === 'error' ? 'Не удалось подтвердить Telegram-вход. Откройте Mini App через Telegram или настройте парольный вход.' : 'Введите личный пароль, чтобы открыть рабочее пространство.'}</p>{authState === 'login' && <><input type="password" autoComplete="current-password" value={loginPassword} onChange={event => setLoginPassword(event.target.value)} placeholder="Пароль доступа" /><button className="primary-button" type="submit" disabled={!loginPassword || isLoggingIn}>{isLoggingIn ? 'Входим…' : 'Войти'} <Send size={15} /></button></>}{loginError && <div className="task-error">{loginError}</div>}</form></div>;
   }
   return (
     <div className="app-shell">
