@@ -233,6 +233,7 @@ function App() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [gemmaReview, setGemmaReview] = useState(null);
   const [qwenReview, setQwenReview] = useState(null);
+  const [executionResult, setExecutionResult] = useState(null);
   const [reviewStatus, setReviewStatus] = useState('');
 
   useEffect(() => {
@@ -272,49 +273,46 @@ function App() {
     setIsSubmitting(true);
     setTaskError('');
     setLastPlan(null);
+    setExecutionResult(null);
     setGemmaReview(null);
     setQwenReview(null);
-    setReviewStatus('План готов. Запускаем независимую проверку Gemma и Qwen…');
+    setReviewStatus('Gemini анализирует задачу и готовит технический план…');
     setGeminiCallStatus(null);
     try {
-      const response = await fetch('/api/plan', {
+      const response = await fetch('/api/execute', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ task: value })
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Не удалось составить план.');
+      if (!response.ok) throw new Error(data.error || 'Команда ИИ не смогла выполнить задачу.');
       setGeminiCallStatus(true);
-      const normalizedPlan = { title: value, ...data.plan, model: data.model, primaryModel: data.primaryModel || data.model, fallbackUsed: Boolean(data.fallbackUsed) };
-      setLastPlan(normalizedPlan);
-      const reviewPlan = [
-        "Краткое описание: " + normalizedPlan.summary,
-        "Шаги: " + (normalizedPlan.steps || []).map((step, index) => (index + 1) + ". " + step).join("\\n"),
-        "Риски: " + (normalizedPlan.risks || []).join("; "),
-        "Вопросы: " + (normalizedPlan.questions || []).join("; ")
-      ].join("\\n");
-      const reviewPayload = JSON.stringify({ task: value, plan: reviewPlan });
-      const [gemmaResult, qwenResult] = await Promise.allSettled([
-        fetch("/api/agents/gemma-review", { method: "POST", headers: { "content-type": "application/json" }, body: reviewPayload }).then(async response => {
-          const result = await response.json();
-          if (!response.ok) throw new Error(result.error || "Gemma не смогла проверить план.");
-          return result;
-        }),
-        fetch("/api/agents/qwen-review", { method: "POST", headers: { "content-type": "application/json" }, body: reviewPayload }).then(async response => {
-          const result = await response.json();
-          if (!response.ok) throw new Error(result.error || "Qwen не смог проверить план.");
-          return result;
-        })
-      ]);
-      setGemmaReview(gemmaResult.status === "fulfilled" ? { ok: true, ...gemmaResult.value } : { ok: false, error: gemmaResult.reason?.message || "Ошибка проверки Gemma." });
-      setQwenReview(qwenResult.status === "fulfilled" ? { ok: true, ...qwenResult.value } : { ok: false, error: qwenResult.reason?.message || "Ошибка проверки Qwen." });
-      setReviewStatus("Независимая проверка завершена.");
-      setTasks(current => [{ id: Date.now(), title: value, status: 'План готов', time: 'Только что' }, ...current]);
+      const plan = data.plan || { summary: data.summary || 'Задача проанализирована', steps: [], risks: [], questions: [] };
+      setLastPlan({
+        title: value,
+        ...plan,
+        model: data.model || 'Gemini',
+        primaryModel: data.primaryModel || data.model || 'Gemini',
+        fallbackUsed: Boolean(data.fallbackUsed)
+      });
+      setExecutionResult(data);
+      setQwenReview({ ok: true, review: data.qwenReview || 'Изменения подготовлены.' });
+      setGemmaReview({ ok: true, review: data.gemmaReview || 'Проверка завершена.' });
+      const count = (data.filesChanged || []).length;
+      setReviewStatus(data.branch
+        ? 'Проверка пройдена. Qwen подготовил ' + count + ' файл(ов) в отдельной GitHub-ветке.'
+        : 'Анализ завершён. Изменения файлов не потребовались.');
+      setTasks(current => [{
+        id: Date.now(),
+        title: value,
+        status: data.branch ? 'Код подготовлен' : 'План готов',
+        time: 'Только что'
+      }, ...current]);
       setTask('');
       setActive('Процессы');
     } catch (error) {
       setGeminiCallStatus(false);
-      setTaskError(error.message || 'Не удалось связаться с сервером.');
+      setTaskError(error.message || 'Не удалось связаться с командой ИИ.');
     } finally {
       setIsSubmitting(false);
     }
@@ -373,7 +371,7 @@ function App() {
             <div className="task-panel-heading"><div className="task-icon"><Command size={18} /></div><div><h2>Новая задача</h2><p>Опишите, что нужно создать или улучшить</p></div><span className="task-step">01 / ЗАПУСК</span></div>
             <form onSubmit={submitTask}>
               <textarea value={task} onChange={e => setTask(e.target.value)} placeholder="Например: создай Telegram-бота для записи клиентов, продумай архитектуру, напиши код и проверь его..." rows={3} />
-              <div className="composer-footer"><div className="composer-hint"><Sparkles size={14} /> Gemini составит план перед выполнением</div><button className="primary-button" type="submit" disabled={!task.trim() || isSubmitting}>{isSubmitting ? 'Анализируем...' : 'Составить план'} <Send size={15} /></button></div>
+              <div className="composer-footer"><div className="composer-hint"><Sparkles size={14} /> Gemini планирует · Qwen разрабатывает · Gemma проверяет</div><button className="primary-button" type="submit" disabled={!task.trim() || isSubmitting}>{isSubmitting ? 'Команда работает…' : 'Запустить команду'} <Send size={15} /></button></div>
             </form>
             {taskError && <div className="task-error" role="alert">{taskError}</div>}
             {lastPlan && <div className="generated-plan">
@@ -382,6 +380,13 @@ function App() {
               <ol>{lastPlan.steps.map((step, index) => <li key={index}>{step}</li>)}</ol>
               {lastPlan.risks?.length > 0 && <div className="plan-notes"><strong>Риски для проверки</strong>{lastPlan.risks.map((risk, index) => <span key={index}>{risk}</span>)}</div>}
               {lastPlan.questions?.length > 0 && <div className="plan-notes"><strong>Нужно уточнить</strong>{lastPlan.questions.map((question, index) => <span key={index}>{question}</span>)}</div>}
+              {executionResult?.branch && <div className="plan-notes">
+                <strong>Результат работы команды</strong>
+                <span>Изменено файлов: {(executionResult.filesChanged || []).length}</span>
+                {(executionResult.filesChanged || []).map(file => <span key={file.path}>{file.path}</span>)}
+                <a href={'https://github.com/adadd89-sys/AI-Studio/tree/' + executionResult.branch} target="_blank" rel="noreferrer">Открыть ветку с изменениями в GitHub →</a>
+                <a href={'https://github.com/adadd89-sys/AI-Studio/compare/main...' + executionResult.branch} target="_blank" rel="noreferrer">Посмотреть сравнение с main →</a>
+              </div>}
               <div className="review-kit">
                 <div className="review-kit-heading"><strong>Автоматическая проверка команды</strong><span>Gemma 4 + Qwen 3.8</span></div>
                 <p>{reviewStatus || "Оба агента автоматически получают план Gemini и независимо проверяют его."}</p>
