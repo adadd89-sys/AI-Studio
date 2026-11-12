@@ -104,11 +104,15 @@ async function githubRequest(env, path, options = {}) {
     ...(options.body ? { "content-type": "application/json" } : {}),
     "authorization": "Bearer " + env.GITHUB_TOKEN
   };
+  const method = (options.method || "GET").toUpperCase();
   const response = await fetch(GITHUB_API + path, { ...options, headers: { ...headers, ...(options.headers || {}) } });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(payload.message || "GitHub API request failed");
+    const githubMessage = typeof payload.message === "string" ? payload.message : "GitHub не вернул описание ошибки";
+    const error = new Error("GitHub API: HTTP " + response.status + " (" + method + " " + path + "): " + githubMessage);
     error.status = response.status;
+    error.endpoint = path;
+    error.method = method;
     throw error;
   }
   return payload;
