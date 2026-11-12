@@ -419,6 +419,217 @@ export default {
       }
     }
 
+
+    if (url.pathname === "/api/execute" && request.method === "POST") {
+      if (!env.APP_PASSWORD || !env.SESSION_SECRET) return json({ error: "Авторизация ещё не настроена." }, 503);
+      if (!await isValidSession(request, env.SESSION_SECRET)) return json({ error: "Требуется вход в AI Studio." }, 401);
+      if (!hasSameOrigin(request)) return json({ error: "Недопустимый источник запроса." }, 403);
+      if (!env.GEMINI_API_KEY) return json({ error: "Gemini API не подключён." }, 503);
+      if (!env.AI) return json({ error: "Workers AI не подключён. Нужны Qwen и Gemma." }, 503);
+      if (!env.GITHUB_TOKEN) return json({ error: "GitHub не подключён. Проверьте GITHUB_TOKEN." }, 503);
+
+      let body;
+      try { body = await request.json(); } catch { return json({ error: "Ожидается корректный JSON." }, 400); }
+      const task = typeof body?.task === "string" ? body.task.trim() : "";
+      if (!task) return json({ error: "Опишите задачу." }, 400);
+      if (task.length > 6000) return json({ error: "Задача слишком длинная. Максимум — 6000 символов." }, 413);
+
+      const primaryModel = env.GEMINI_MODEL || "gemini-4-hydrogen";
+      const fallbackModel = env.GEMINI_FALLBACK_MODEL || "gemini-3.8-flash";
+      const qwenModel = env.QWEN_MODEL || "@cf/qwen/qwen3.8-27b";
+      const gemmaModel = env.GEMMA_MODEL || "@cf/google/gemma-4-26b-a4b-it";
+
+      function parseJsonObject(value) {
+        if (typeof value !== "string") return null;
+        let cleaned = value.trim();
+        if (cleaned.startsWith(String.fromCharCode(96,96,96))) {
+          cleaned = cleaned.replace(/^\x60{3}(?:json)?\s*/i, "").replace(/\s*\x60{3}$/, "");
+        }
+        try {
+          const parsed = JSON.parse(cleaned);
+          return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+        } catch {
+          const start = cleaned.indexOf("{");
+          const end = cleaned.lastIndexOf("}");
+          if (start < 0 || end <= start) return null;
+          try {
+            const parsed = JSON.parse(cleaned.slice(start, end + 1));
+            return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+          } catch { return null; }
+        }
+      }
+      function modelText(result) {
+        if (typeof result?.response === "string") return result.response.trim();
+        if (typeof result?.choices?.[0]?.message?.content === "string") return result.choices[0].message.content.trim();
+        return "";
+      }
+      async function callGemini(prompt) {
+        const requestBody = JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: "application/json", temperature: 0.2 }
+        });
+        async function call(model) {
+          return fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) +
+            ":generateContent?key=" + encodeURIComponent(env.GEMINI_API_KEY), {
+              method: "POST", headers: { "content-type": "application/json" }, body: requestBody
+            });
+        }
+        let model = primaryModel;
+        let response = await call(primaryModel);
+        let fallbackUsed = false;
+        if (!response.ok && [429,500,502,503,504].includes(response.status) && fallbackModel !== primaryModel) {
+          model = fallbackModel; fallbackUsed = true; response = await call(fallbackModel);
+        }
+        if (!response.ok) { const error = new Error("Gemini API вернул ошибку " + response.status); error.status = response.status; throw error; }
+        const payload = await response.json();
+        const raw = payload?.candidates?.[0]?.content?.parts?.map(part => part.text || "").join("").trim();
+        const parsed = parseJsonObject(raw);
+        if (!parsed) throw new Error("Gemini вернул ответ не в формате JSON.");
+        return { data: parsed, model, fallbackUsed };
+      }
+
+      try {
+        const planResult = await callGemini(
+          "Ты — руководитель команды разработки AI Studio. Проанализируй задачу и составь конкретный исполнимый план для изменения текущего репозитория AI Studio. " +
+          "Верни только JSON: {\"summary\":\"...\",\"steps\":[\"...\"],\"acceptanceCriteria\":[\"...\"],\"risks\":[\"...\"],\"questions\":[]}. " +
+          "Если данных достаточно, questions должен быть пустым массивом. Не утверждай, что работа уже выполнена. Задача пользователя: " + task
+        );
+        const plan = planResult.data;
+        if (typeof plan.summary !== "string" || !Array.isArray(plan.steps) || !plan.steps.length) {
+          return json({ error: "Gemini составил план в неожиданном формате." }, 502);
+        }
+
+        const tree = await githubRequest(env, "/repos/" + GITHUB_REPO + "/git/trees/main?recursive=1");
+        const repoFiles = (tree.tree || []).filter(item => item.type === "blob").map(item => item.path).slice(0, 250);
+        const contextPaths = ["src/App.jsx", "src/styles.css", "worker/index.js", "worker/index.test.js"];
+        const contextFiles = [];
+        for (const path of contextPaths) {
+          const item = (tree.tree || []).find(entry => entry.type === "blob" && entry.path === path);
+          if (!item) continue;
+          const file = await githubRequest(env, "/repos/" + GITHUB_REPO + "/contents/" + path.split("/").map(encodeURIComponent).join("/") + "?ref=main");
+          if (typeof file.content !== "string") continue;
+          const binary = atob(file.content.replace(/\s/g, ""));
+          const bytes = Uint8Array.from(binary, char => char.charCodeAt(0));
+          const content = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+          contextFiles.push({ path, content: content.slice(0, path === "worker/index.js" ? 9000 : 12000) });
+        }
+
+        const developerSystem =
+          "Ты — Qwen, основной разработчик команды AI Studio. Подготовь реальные изменения файлов существующего репозитория. " +
+          "Верни ТОЛЬКО JSON без Markdown: {\"summary\":\"...\",\"changes\":[{\"path\":\"src/...\",\"content\":\"ПОЛНОЕ СОДЕРЖИМОЕ ФАЙЛА\",\"reason\":\"...\"}]}. " +
+          "Каждый content — полное содержимое файла, не diff. Не выдумывай секреты и API-ключи. " +
+          "Не меняй workflows, package.json, package-lock, wrangler config, настройки доступа или секреты. " +
+          "Изменяй только необходимые файлы внутри src/, public/, worker/ либо index.html. Максимум 6 файлов. " +
+          "Сохраняй архитектуру. Если задача не требует кода, верни changes: [].";
+        const contextText = "Контекст файлов (содержимое может быть обрезано):\n" +
+          contextFiles.map(file => "===== " + file.path + " =====\n" + file.content).join("\n\n") +
+          "\n\nДерево файлов:\n" + repoFiles.join("\n");
+        const planText = JSON.stringify(plan);
+        async function askQwen(feedback) {
+          const result = await env.AI.run(qwenModel, {
+            messages: [
+              { role: "system", content: developerSystem },
+              { role: "user", content: "Задача пользователя:\n" + task + "\n\nПлан Gemini:\n" + planText +
+                "\n\n" + contextText + (feedback ? "\n\nЗамечания Gemma:\n" + feedback : "") +
+                "\n\nПодготовь законченные изменения файлов. Ответ только JSON." }
+            ],
+            max_completion_tokens: 8192, temperature: 0.15
+          });
+          const parsed = parseJsonObject(modelText(result));
+          if (!parsed || !Array.isArray(parsed.changes)) throw new Error("Qwen вернул ответ не в ожидаемом формате.");
+          if (parsed.changes.length > 6) throw new Error("Qwen предложил изменить больше 6 файлов.");
+          for (const change of parsed.changes) {
+            if (!change || typeof change.path !== "string" || typeof change.content !== "string") throw new Error("Qwen вернул некорректное описание файла.");
+            const allowed = change.path === "index.html" || change.path.startsWith("src/") ||
+              change.path.startsWith("public/") || change.path.startsWith("worker/");
+            if (!allowed || !validRepoPath(change.path) || change.path.split("/").some(part => part.startsWith(".")) ||
+                change.path.includes("node_modules") || change.path.includes("dist/")) {
+              throw new Error("Запрошен недопустимый путь файла: " + change.path);
+            }
+            if (change.content.length > 250000) throw new Error("Файл " + change.path + " превышает лимит 250 КБ.");
+          }
+          return parsed;
+        }
+
+        let implementation = await askQwen("");
+        if (!implementation.changes.length) {
+          return json({ ok: true, task, plan, summary: implementation.summary || plan.summary,
+            model: planResult.model, primaryModel, fallbackUsed: planResult.fallbackUsed,
+            qwenModel, gemmaModel, branch: null, filesChanged: [],
+            qwenReview: "Qwen не предложил изменений файлов.",
+            gemmaReview: "Проверка кода не запускалась, так как изменений нет." });
+        }
+
+        async function reviewChanges(changes) {
+          const reviewInput = JSON.stringify({ task, plan,
+            changes: changes.map(change => ({ path: change.path, reason: change.reason || "", content: change.content })) });
+          const result = await env.AI.run(gemmaModel, {
+            messages: [
+              { role: "system", content: "Ты — Gemma, независимый ревьюер и тестировщик. Критически проверь изменения на соответствие задаче, ошибки, безопасность и поломку архитектуры. " +
+                "Верни только JSON: {\"approved\":true,\"summary\":\"...\",\"issues\":[\"...\"]}. " +
+                "approved=true только если изменения пригодны к сохранению. Не утверждай, что запускал тесты: ты анализируешь код." },
+              { role: "user", content: reviewInput }
+            ],
+            max_completion_tokens: 2200, temperature: 0.1
+          });
+          const parsed = parseJsonObject(modelText(result));
+          if (!parsed || typeof parsed.approved !== "boolean" || !Array.isArray(parsed.issues)) throw new Error("Gemma вернула ответ не в ожидаемом формате.");
+          return parsed;
+        }
+
+        let review = await reviewChanges(implementation.changes);
+        let repairAttempted = false;
+        if (!review.approved) {
+          repairAttempted = true;
+          implementation = await askQwen(JSON.stringify(review));
+          if (!implementation.changes.length) return json({ error: "Gemma отклонила изменения, а Qwen не предложил исправления.", review }, 422);
+          review = await reviewChanges(implementation.changes);
+        }
+        if (!review.approved) return json({
+          error: "Gemma не одобрила изменения после исправления. В GitHub ничего не записано.",
+          plan, review, repairAttempted
+        }, 422);
+
+        const branch = "ai-studio/task-" + Date.now().toString(36);
+        const base = await githubRequest(env, "/repos/" + GITHUB_REPO + "/git/ref/heads/main");
+        await githubRequest(env, "/repos/" + GITHUB_REPO + "/git/refs", {
+          method: "POST", body: JSON.stringify({ ref: "refs/heads/" + branch, sha: base.object.sha })
+        });
+
+        const changed = [];
+        try {
+          for (const change of implementation.changes) {
+            const existing = (tree.tree || []).find(item => item.type === "blob" && item.path === change.path);
+            const bytes = new TextEncoder().encode(change.content);
+            let binary = "";
+            for (const byte of bytes) binary += String.fromCharCode(byte);
+            const payload = { message: "AI Studio: " + (change.reason || "update " + change.path).slice(0, 100),
+              content: btoa(binary), branch };
+            if (existing) {
+              const current = await githubRequest(env, "/repos/" + GITHUB_REPO + "/contents/" +
+                change.path.split("/").map(encodeURIComponent).join("/") + "?ref=" + encodeURIComponent(branch));
+              payload.sha = current.sha;
+            }
+            const saved = await githubRequest(env, "/repos/" + GITHUB_REPO + "/contents/" +
+              change.path.split("/").map(encodeURIComponent).join("/"), { method: "PUT", body: JSON.stringify(payload) });
+            changed.push({ path: change.path, commit: saved.commit?.sha || null });
+          }
+        } catch (writeError) {
+          return json({ error: "Не все файлы удалось сохранить. Частичные изменения оставлены в отдельной ветке; main не затронута.",
+            branch, filesChanged: changed, detail: writeError.message }, 502);
+        }
+
+        return json({ ok: true, task, plan, summary: implementation.summary || plan.summary,
+          model: planResult.model, primaryModel, fallbackUsed: planResult.fallbackUsed,
+          qwenModel, gemmaModel, branch, filesChanged: changed,
+          qwenReview: "Изменения подготовлены Qwen.",
+          gemmaReview: review.summary || (review.issues.length ? review.issues.join("\n") : "Изменения одобрены."),
+          reviewIssues: review.issues, repairAttempted });
+      } catch (error) {
+        return json({ error: error?.message || "Не удалось выполнить задачу командой ИИ.", upstreamStatus: error?.status || null }, 502);
+      }
+    }
+
     if (url.pathname === "/api/plan" && request.method === "POST") {
       if (!env.APP_PASSWORD || !env.SESSION_SECRET) {
         return json({ error: "Авторизация ещё не настроена. Добавьте APP_PASSWORD и SESSION_SECRET в секреты Worker." }, 503);
