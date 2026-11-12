@@ -327,7 +327,7 @@ function App() {
     setExecutionResult(null);
     setGemmaReview(null);
     setQwenReview(null);
-    setReviewStatus('Gemini анализирует задачу и готовит технический план…');
+    setReviewStatus(teamSettings.agents.gemini ? 'Gemini анализирует задачу и готовит технический план…' : 'Разработчик готовит изменения по базовому плану…');
     setGeminiCallStatus(null);
     try {
       const response = await fetch('/api/execute', {
@@ -484,7 +484,7 @@ function App() {
             {taskError && <div className="task-error" role="alert">{taskError}</div>}
             {teamSettings.mode === 'chat' && chatMessages.length > 0 && <div className="chat-thread">{chatMessages.map((item,index) => <div key={index} className={'chat-message ' + item.role}><span>{item.role === 'user' ? 'Вы' : item.agent || 'AI Studio'}</span><p>{item.content}</p></div>)}</div>}
             {lastPlan && <div className="generated-plan">
-              <div className="plan-header"><div><span className="eyebrow">ПЛАН ОТ GEMINI</span><h3>{lastPlan.summary}</h3></div><div className="plan-model-stack"><span className="plan-model">{lastPlan.model}</span><span className={lastPlan.fallbackUsed ? 'model-route fallback' : 'model-route'}>{lastPlan.fallbackUsed ? 'Резервное переключение' : 'Основная модель'}</span></div></div>
+              <div className="plan-header"><div><span className="eyebrow">ПЛАН · {lastPlan.model}</span><h3>{lastPlan.summary}</h3></div><div className="plan-model-stack"><span className="plan-model">{lastPlan.model}</span><span className={lastPlan.fallbackUsed ? 'model-route fallback' : 'model-route'}>{lastPlan.fallbackUsed ? 'Резервное переключение' : 'Основная модель'}</span></div></div>
               <div className={lastPlan.fallbackUsed ? 'model-info fallback' : 'model-info'}>{lastPlan.fallbackUsed ? <>Основная модель <strong>{lastPlan.primaryModel}</strong> была недоступна. Ответ получен от резервной модели <strong>{lastPlan.model}</strong>.</> : <>Запрос выполнен основной моделью <strong>{lastPlan.model}</strong>. Резервная модель не потребовалась.</>}</div>
               <ol>{lastPlan.steps.map((step, index) => <li key={index}>{step}</li>)}</ol>
               {lastPlan.risks?.length > 0 && <div className="plan-notes"><strong>Риски для проверки</strong>{lastPlan.risks.map((risk, index) => <span key={index}>{risk}</span>)}</div>}
