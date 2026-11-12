@@ -57,17 +57,15 @@ jobs:
             echo "::error::Add CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID to GitHub Actions secrets."
             exit 1
           fi
+          # Normalize accidental CR/LF characters introduced when pasting secrets.
+          printf 'CLOUDFLARE_API_TOKEN=%s\n' "$(printf '%s' "$CLOUDFLARE_API_TOKEN" | tr -d '\r\n')" >> "$GITHUB_ENV"
+          printf 'CLOUDFLARE_ACCOUNT_ID=%s\n' "$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID" | tr -d '\r\n')" >> "$GITHUB_ENV"
 
       - name: Deploy isolated test Worker
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler deploy --name ai-studio-test
 
       - name: Configure test Worker secrets when supplied
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           PREVIEW_APP_PASSWORD: ${{ secrets.PREVIEW_APP_PASSWORD }}
           PREVIEW_SESSION_SECRET: ${{ secrets.PREVIEW_SESSION_SECRET }}
           PREVIEW_GEMINI_API_KEY: ${{ secrets.PREVIEW_GEMINI_API_KEY }}
