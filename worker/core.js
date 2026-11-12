@@ -554,7 +554,7 @@ export default {
       if (task.length > 6000) return json({ error: "Задача слишком длинная. Максимум — 6000 символов." }, 413);
 
       const usage = { requests: 0, neurons: null, agents: [] };
-      const intensity = teamSettings.mode === "max" ? Math.max(80, teamSettings.intensity) : teamSettings.mode === "chat" ? Math.min(20, teamSettings.intensity) : teamSettings.intensity;
+      const intensity = teamSettings.mode === "max" ? 100 : teamSettings.intensity;
       const deepReview = teamSettings.agents.gemma && intensity >= 50;
       const allowRepair = intensity >= 80;
       const primaryModel = env.GEMINI_MODEL || "gemini-4-hydrogen";
@@ -792,13 +792,48 @@ export default {
           return parsed;
         }
 
-        let review = deepReview ? await reviewChanges(implementation.changes) : { approved: true, summary: "Ревью пропущено согласно выбранной интенсивности.", issues: [] };
+        async function reviewWithNorth(changes) {
+          executionStage = "north_review";
+          usage.requests++;
+          if (!usage.agents.includes("north")) usage.agents.push("north");
+          const reviewInput = JSON.stringify({ task, plan, changes: changes.map(change => ({ path: change.path, reason: change.reason || "", content: change.content.slice(0, 16000) })) });
+          const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: { "content-type": "application/json", "authorization": "Bearer " + env.OPENROUTER_API_KEY, "http-referer": "https://ai-studio.sergey-adadd89.workers.dev", "x-title": "AI Studio" },
+            body: JSON.stringify({ model: "cohere/north-mini-code:free", temperature: 0.1, max_tokens: 1600,
+              messages: [
+                { role: "system", content: "Ты — независимый ревьюер AI Studio. Проверь изменения на соответствие задаче, ошибки, безопасность и возможные регрессии. Верни только JSON: {\\"approved\\":true,\\"summary\\":\\"...\\",\\"issues\\":[\\"...\\"]}. Не утверждай, что запускал тесты." },
+                { role: "user", content: reviewInput }
+              ] })
+          });
+          if (!response.ok) throw new Error("OpenRouter North review вернул HTTP " + response.status);
+          const payload = await response.json();
+          const parsed = parseJsonObject(modelText(payload));
+          if (!parsed || typeof parsed.approved !== "boolean" || !Array.isArray(parsed.issues)) throw new Error("North Mini Code вернула отзыв не в ожидаемом формате.");
+          return parsed;
+        }
+
+        async function reviewTeam(changes) {
+          const reviews = [];
+          if (deepReview) reviews.push({ agent: "gemma", result: await reviewChanges(changes) });
+          if (teamSettings.agents.north && intensity >= 50) reviews.push({ agent: "north", result: await reviewWithNorth(changes) });
+          return {
+            approved: reviews.every(item => item.result.approved),
+            summary: reviews.map(item => (item.agent === "north" ? "North: " : "Gemma: ") + (item.result.summary || (item.result.approved ? "Одобрено" : "Есть замечания"))).join(" · ") || "Ревью пропущено согласно выбранной интенсивности.",
+            issues: reviews.flatMap(item => item.result.issues || []),
+            northReview: reviews.find(item => item.agent === "north")?.result || null
+          };
+        }
+
+        let review = deepReview || (teamSettings.agents.north && intensity >= 50)
+          ? await reviewTeam(implementation.changes)
+          : { approved: true, summary: "Ревью пропущено согласно выбранной интенсивности.", issues: [], northReview: null };
         let repairAttempted = false;
         if (!review.approved && allowRepair) {
           repairAttempted = true;
           implementation = teamSettings.agents.qwen ? await askQwen(JSON.stringify(review)) : await askNorth(JSON.stringify(review));
           if (!implementation.changes.length) return json({ error: "Ревью отклонило изменения, а разработчик не предложил исправлений.", review }, 422);
-          review = await reviewChanges(implementation.changes);
+          review = await reviewTeam(implementation.changes);
         }
         if (!review.approved) return json({
           error: "Gemma не одобрила изменения. В GitHub ничего не записано.",
@@ -840,7 +875,7 @@ export default {
           usage: { requests: usage.requests, neurons: null },
           qwenReview: teamSettings.agents.qwen ? "Изменения подготовлены Qwen." : "Изменения подготовлены Cohere North Mini Code.",
           gemmaReview: deepReview ? (review.summary || (review.issues.length ? review.issues.join("\n") : "Изменения одобрены.")) : "Ревью пропущено согласно интенсивности.",
-          reviewIssues: review.issues, repairAttempted });
+          reviewIssues: review.issues, northReview: review.northReview, repairAttempted });
       } catch (error) {
         return json({
           error: error?.message || "Не удалось выполнить задачу командой ИИ.",
