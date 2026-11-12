@@ -29,3 +29,20 @@
 .login-card .primary-button{justify-content:center;padding:12px}
 
 .plan-model-stack{display:grid;justify-items:end;gap:6px;flex-shrink:0}.model-route{font-size:8px;color:#8fcbb0}.model-route.fallback{color:#e5bd78}.model-info{margin-top:11px;padding:9px 11px;border:1px solid #294438;border-radius:8px;background:#122019;color:#a8cbb8;font-size:9px;line-height:1.55}.model-info strong{color:#d7f1e3;font-weight:700}.model-info.fallback{border-color:#5a4930;background:#211c14;color:#d7bd91}.model-info.fallback strong{color:#f1d9aa}
+
+.review-kit{margin-top:16px;padding:14px;border:1px solid #343b4b;border-radius:10px;background:#141923}
+.review-kit-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.review-kit-heading strong{font:650 11px Manrope;color:#e5e8f1}
+.review-kit-heading span{font-size:8px;color:#a9c8b6;border:1px solid #294438;border-radius:20px;padding:5px 8px}
+.review-kit>p{font-size:9px;line-height:1.55;color:#8992a3;margin:8px 0 12px}
+.review-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.review-actions button{border:1px solid #3a4050;border-radius:7px;background:#202637;color:#c9c6f4;padding:8px 10px;font-size:9px}
+.review-actions button:hover{border-color:#7565c3;background:#29283e}
+.review-actions button:disabled{opacity:.4;cursor:not-allowed}
+.review-actions span{font-size:9px;color:#8fcbb0}
+.review-inputs{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0}
+.review-inputs label{display:grid;gap:6px;color:#aeb5c5;font-size:9px}
+.review-inputs textarea{width:100%;resize:vertical;min-height:72px;border:1px solid #343b4b;background:#0f131b;color:#e9eaf0;border-radius:8px;padding:9px;font:inherit;font-size:9px;line-height:1.5;outline:none}
+.review-inputs textarea:focus{border-color:#7565c3;box-shadow:0 0 0 3px #7968c31c}
+.final-review-actions{justify-content:space-between}
+@media(max-width:650px){.review-inputs{grid-template-columns:1fr}.review-kit-heading{align-items:flex-start;flex-direction:column}}
