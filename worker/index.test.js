@@ -97,7 +97,7 @@ describe("AI Studio Worker", () => {
     const response = await worker.fetch(new Request("https://studio.test/api/session", {
       headers: { cookie }
     }), env);
-    assert.deepEqual(await response.json(), { authenticated: true, authConfigured: true });
+    assert.deepEqual(await response.json(), { authenticated: true, authConfigured: true, telegramAuthConfigured: false });
   });
 
   it("rejects an incorrect password", async () => {
