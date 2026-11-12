@@ -149,7 +149,7 @@ export default {
         return json({ error: "Gemini пока не подключён. Добавьте GEMINI_API_KEY в секреты Worker." }, 503);
       }
 
-      const model = env.GEMINI_MODEL || "gemini-2.5-flash";
+      const model = env.GEMINI_MODEL || "gemini-3.8-flash";
       let upstream;
       try {
         upstream = await fetch(
