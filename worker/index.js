@@ -462,27 +462,64 @@ export default {
 
       function parseJsonObject(value) {
         if (typeof value !== "string") return null;
-        let cleaned = value.trim();
-        if (cleaned.startsWith(String.fromCharCode(96,96,96))) {
-          cleaned = cleaned.replace(/^\x60{3}(?:json)?\s*/i, "").replace(/\s*\x60{3}$/, "");
-        }
-        try {
-          const parsed = JSON.parse(cleaned);
-          return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
-        } catch {
-          const start = cleaned.indexOf("{");
-          const end = cleaned.lastIndexOf("}");
-          if (start < 0 || end <= start) return null;
+        let cleaned = value.trim().replace(/^\x60{3}(?:json)?\s*/i, "").replace(/\s*\x60{3}$/i, "").trim();
+        const tryParse = text => {
           try {
-            const parsed = JSON.parse(cleaned.slice(start, end + 1));
+            const parsed = JSON.parse(text);
             return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
           } catch { return null; }
+        };
+        const direct = tryParse(cleaned);
+        if (direct) return direct;
+        // Find the first complete JSON object without being confused by braces inside strings.
+        for (let start = cleaned.indexOf("{"); start >= 0; start = cleaned.indexOf("{", start + 1)) {
+          let depth = 0, inString = false, escaped = false;
+          for (let i = start; i < cleaned.length; i++) {
+            const ch = cleaned[i];
+            if (inString) {
+              if (escaped) escaped = false;
+              else if (ch === "\\\\") escaped = true;
+              else if (ch === '"') inString = false;
+              continue;
+            }
+            if (ch === '"') inString = true;
+            else if (ch === "{") depth++;
+            else if (ch === "}" && --depth === 0) {
+              const parsed = tryParse(cleaned.slice(start, i + 1));
+              if (parsed) return parsed;
+              break;
+            }
+          }
         }
+        return null;
       }
       function modelText(result) {
-        if (typeof result?.response === "string") return result.response.trim();
-        if (typeof result?.choices?.[0]?.message?.content === "string") return result.choices[0].message.content.trim();
+        const candidates = [
+          result?.response,
+          result?.choices?.[0]?.message?.content,
+          result?.choices?.[0]?.text,
+          result?.generated_text,
+          result?.output_text,
+          result?.output,
+          result?.result?.response,
+          result?.result?.generated_text
+        ];
+        for (const candidate of candidates) {
+          if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+          if (Array.isArray(candidate)) {
+            const joined = candidate.map(part => typeof part === "string" ? part : part?.text || "").join("").trim();
+            if (joined) return joined;
+          }
+        }
         return "";
+      }
+      function normalizeQwenPayload(parsed) {
+        let value = parsed;
+        for (let depth = 0; depth < 3 && value && !Array.isArray(value.changes); depth++) {
+          value = value.result || value.data || value.output || value.response || value;
+          if (typeof value === "string") value = parseJsonObject(value);
+        }
+        return value && Array.isArray(value.changes) ? value : null;
       }
       async function callGemini(prompt) {
         const requestBody = JSON.stringify({
@@ -566,8 +603,15 @@ export default {
             ],
             max_completion_tokens: 4096, temperature: 0.15
           });
-          const parsed = parseJsonObject(modelText(result));
-          if (!parsed || !Array.isArray(parsed.changes)) throw new Error("Qwen вернул ответ не в ожидаемом формате.");
+          const rawText = modelText(result);
+          const parsed = normalizeQwenPayload(parseJsonObject(rawText));
+          if (!parsed) {
+            const preview = rawText.replace(/\s+/g, " ").slice(0, 500);
+            const shape = result && typeof result === "object" ? Object.keys(result).join(", ") : typeof result;
+            throw new Error("Qwen вернул ответ, который не удалось разобрать как JSON с массивом changes. " +
+              "Поля ответа: " + (shape || "нет") + "; длина текста: " + rawText.length +
+              "; фрагмент: " + (preview || "пустой ответ"));
+          }
           if (parsed.changes.length > 6) throw new Error("Qwen предложил изменить больше 6 файлов.");
           for (const change of parsed.changes) {
             if (!change || typeof change.path !== "string" || typeof change.content !== "string") throw new Error("Qwen вернул некорректное описание файла.");
