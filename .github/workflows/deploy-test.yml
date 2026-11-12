@@ -1,0 +1,96 @@
+name: Deploy AI Studio test Worker
+
+on:
+  push:
+    branches:
+      - feature/github-code-workspace
+    paths:
+      - "worker/**"
+      - "src/**"
+      - "public/**"
+      - "index.html"
+      - "vite.config.*"
+      - "wrangler.jsonc"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/deploy-test.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-studio-test-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy-test:
+    name: Build and deploy isolated test Worker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout test branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/github-code-workspace
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build application
+        run: npm run build
+
+      - name: Verify Cloudflare deployment credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::error::Add CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID to GitHub Actions secrets."
+            exit 1
+          fi
+
+      - name: Deploy isolated test Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler deploy --name ai-studio-test
+
+      - name: Configure test Worker secrets when supplied
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PREVIEW_APP_PASSWORD: ${{ secrets.PREVIEW_APP_PASSWORD }}
+          PREVIEW_SESSION_SECRET: ${{ secrets.PREVIEW_SESSION_SECRET }}
+          PREVIEW_GEMINI_API_KEY: ${{ secrets.PREVIEW_GEMINI_API_KEY }}
+          PREVIEW_GITHUB_TOKEN: ${{ secrets.PREVIEW_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set +x
+          put_secret() {
+            local secret_name="$1"
+            local secret_value="$2"
+            if [ -n "$secret_value" ]; then
+              printf '%s' "$secret_value" | npx wrangler secret put "$secret_name" --name ai-studio-test
+              echo "Configured $secret_name"
+            else
+              echo "Skipped $secret_name (optional GitHub Actions secret not set)"
+            fi
+          }
+          put_secret APP_PASSWORD "$PREVIEW_APP_PASSWORD"
+          put_secret SESSION_SECRET "$PREVIEW_SESSION_SECRET"
+          put_secret GEMINI_API_KEY "$PREVIEW_GEMINI_API_KEY"
+          put_secret GITHUB_TOKEN "$PREVIEW_GITHUB_TOKEN"
+
+      - name: Print test endpoint
+        run: |
+          echo "Test Worker: https://ai-studio-test.${{ secrets.CLOUDFLARE_ACCOUNT_SUBDOMAIN }}.workers.dev"
+          echo "Health endpoint: https://ai-studio-test.${{ secrets.CLOUDFLARE_ACCOUNT_SUBDOMAIN }}.workers.dev/api/health"
