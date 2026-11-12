@@ -143,6 +143,41 @@ describe("AI Studio Worker", () => {
     }
   });
 
+  it("falls back from Hydrogen to Flash when the primary model is rate-limited", async () => {
+    const originalFetch = globalThis.fetch;
+    const requestedModels = [];
+    globalThis.fetch = async (url) => {
+      const match = String(url).match(/models\/([^:]+):generateContent/);
+      requestedModels.push(decodeURIComponent(match?.[1] || ""));
+      if (requestedModels.length === 1) return new Response("{}", { status: 429 });
+      return new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: JSON.stringify({
+          summary: "План создан резервной моделью",
+          steps: ["Проверить результат"],
+          risks: [],
+          questions: []
+        }) }] } }]
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+
+    try {
+      const cookie = await getSessionCookie();
+      const response = await worker.fetch(planRequest(cookie), {
+        ...env,
+        GEMINI_MODEL: "gemini-4-hydrogen",
+        GEMINI_FALLBACK_MODEL: "gemini-3.8-flash"
+      });
+      assert.equal(response.status, 200);
+      const result = await response.json();
+      assert.equal(result.model, "gemini-3.8-flash");
+      assert.equal(result.primaryModel, "gemini-4-hydrogen");
+      assert.equal(result.fallbackUsed, true);
+      assert.deepEqual(requestedModels, ["gemini-4-hydrogen", "gemini-3.8-flash"]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("returns a rate-limit message when Gemini responds with 429", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () => new Response("{}", { status: 429 });
