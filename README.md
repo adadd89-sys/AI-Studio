@@ -21,7 +21,7 @@ Create a local `.dev.vars` file (never commit it):
 
 ```ini
 GEMINI_API_KEY=your_gemini_api_key
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.8-flash
 ```
 
 Run the Worker and frontend in two terminals:
@@ -57,7 +57,7 @@ Create a Gemini API key in Google AI Studio and keep it in a Worker secret for d
 npx wrangler secret put GEMINI_API_KEY
 ```
 
-The default model is `gemini-2.5-flash`. Free-tier access and request limits depend on Google's current account and model quotas. Review Google's current pricing and data-use terms before sending private or sensitive project information.
+The default model is `gemini-3.8-flash`. Google currently lists free input and output tokens for this model on the Gemini API Free Tier, subject to rate limits and availability. Review Google's current pricing and data-use terms before sending private or sensitive project information. Review Google's current pricing and data-use terms before sending private or sensitive project information.
 
 ## Deployment
 
