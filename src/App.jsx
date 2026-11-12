@@ -16,9 +16,9 @@ const navigation = [
 ];
 
 const agents = [
-  { name: 'Gemini', role: 'Планировщик и координатор', tone: 'blue', initials: 'Ge', detail: 'Анализирует запрос, формирует план и распределяет работу.' },
-  { name: 'Gemma 4', role: 'Аналитик и тестировщик', tone: 'green', initials: 'G', detail: 'Независимо проверяет план, риски и критерии готовности.' },
-  { name: 'Qwen 3.8', role: 'Основной разработчик и исполнитель', tone: 'violet', initials: 'Q', detail: 'Проектирует архитектуру, пишет код и готовит изменения файлов.' }
+  { name: 'Gemini 4 Hydrogen', model: 'Google Gemini API · резерв: Gemini 3.8 Flash', role: 'Руководитель и координатор', tone: 'blue', initials: 'Ge', key: 'gemini', detail: 'Разбирает запрос, формирует техническое задание, распределяет работу и объединяет результаты.' },
+  { name: 'Gemma 4 26B', model: 'Cloudflare Workers AI · @cf/google/gemma-4-26b-a4b-it', role: 'Аналитик и контроль качества', tone: 'green', initials: 'G', key: 'gemma', detail: 'Независимо проверяет планы и код, выявляет риски, ошибки и недостающие тесты.' },
+  { name: 'Qwen 3.8 27B', model: 'Cloudflare Workers AI · @cf/qwen/qwen3.8-27b', role: 'Основной разработчик', tone: 'violet', initials: 'Q', key: 'qwen', detail: 'Проектирует архитектуру, пишет и исправляет код. Следующий этап — автоматическое применение изменений в GitHub.' }
 ];
 
 
@@ -194,6 +194,7 @@ function App() {
   const [taskError, setTaskError] = useState('');
   const [lastPlan, setLastPlan] = useState(null);
   const [geminiHealth, setGeminiHealth] = useState(null);
+  const [geminiCallStatus, setGeminiCallStatus] = useState(null);
   const [authState, setAuthState] = useState('checking');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
@@ -242,6 +243,7 @@ function App() {
     setGemmaReview(null);
     setQwenReview(null);
     setReviewStatus('План готов. Запускаем независимую проверку Gemma и Qwen…');
+    setGeminiCallStatus(null);
     try {
       const response = await fetch('/api/plan', {
         method: 'POST',
@@ -250,6 +252,7 @@ function App() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Не удалось составить план.');
+      setGeminiCallStatus(true);
       const normalizedPlan = { title: value, ...data.plan, model: data.model, primaryModel: data.primaryModel || data.model, fallbackUsed: Boolean(data.fallbackUsed) };
       setLastPlan(normalizedPlan);
       const reviewPlan = [
@@ -278,6 +281,7 @@ function App() {
       setTask('');
       setActive('Процессы');
     } catch (error) {
+      if (!lastPlan) setGeminiCallStatus(false);
       setTaskError(error.message || 'Не удалось связаться с сервером.');
     } finally {
       setIsSubmitting(false);
@@ -360,11 +364,17 @@ function App() {
           <section className="section-block">
             <div className="section-heading"><div><div className="eyebrow">ВАШИ СПЕЦИАЛИСТЫ</div><h2>Команда ИИ</h2></div><button className="subtle-button" onClick={() => setActive('Команда ИИ')}>Вся команда <ChevronRight size={15} /></button></div>
             <div className="agent-grid">
-              {agents.map(agent => <article className="agent-card" key={agent.name}>
-                <div className="agent-card-top"><div className={'agent-avatar ' + agent.tone}>{agent.initials}</div><span className="agent-status"><span /> {agent.name === 'Gemini' ? (geminiHealth === null ? 'Проверяем API…' : geminiHealth.modelConfigured ? 'API-ключ настроен' : 'Нужен API-ключ') : agent.name === 'Qwen 3.8' ? (geminiHealth?.qwenConfigured ? 'Workers AI подключён' : 'Нет AI binding') : 'Workers AI'}</span></div>
-                <h3>{agent.name}</h3><div className="agent-role">{agent.role}</div><p>{agent.detail}</p>
-                <div className="agent-card-bottom"><span><ShieldCheck size={14} /> Роль назначена</span><ChevronRight size={16} /></div>
-              </article>)}
+              {agents.map(agent => {
+                const configured = agent.key === 'gemini' ? Boolean(geminiHealth?.modelConfigured) : Boolean(geminiHealth?.qwenConfigured);
+                const result = agent.key === 'gemini' ? geminiCallStatus : agent.key === 'gemma' ? gemmaReview?.ok : qwenReview?.ok;
+                const failed = agent.key === 'gemini' ? geminiCallStatus === false : (agent.key === 'gemma' ? gemmaReview?.ok === false : qwenReview?.ok === false);
+                const status = result === true ? 'Ответ получен' : failed ? 'Ошибка вызова' : configured ? 'Подключение настроено · ждёт теста' : geminiHealth === null ? 'Проверяем подключение…' : 'Не настроено';
+                return <article className="agent-card" key={agent.key}>
+                  <div className="agent-card-top"><div className={'agent-avatar ' + agent.tone}>{agent.initials}</div><span className={'agent-status ' + (result === true ? 'is-working' : failed ? 'is-error' : 'is-configured')}><span /> {status}</span></div>
+                  <h3>{agent.name}</h3><div className="agent-role">{agent.role}</div><div className="agent-model">{agent.model}</div><p>{agent.detail}</p>
+                  <div className="agent-card-bottom"><span><ShieldCheck size={14} /> {result === true ? 'Генерация подтверждена' : configured ? 'Провайдер настроен' : 'Требуется настройка'}</span><ChevronRight size={16} /></div>
+                </article>;
+              })}
             </div>
           </section>
 
