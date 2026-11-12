@@ -499,7 +499,8 @@ export default {
           return json({ error: "Gemini составил план в неожиданном формате." }, 502);
         }
 
-        const tree = await githubRequest(env, "/repos/" + GITHUB_REPO + "/git/trees/main?recursive=1");
+        const mainRef = await githubRequest(env, "/repos/" + GITHUB_REPO + "/git/ref/heads/main");
+        const tree = await githubRequest(env, "/repos/" + GITHUB_REPO + "/git/trees/" + mainRef.object.sha + "?recursive=1");
         const repoFiles = (tree.tree || []).filter(item => item.type === "blob").map(item => item.path).slice(0, 250);
         const contextPaths = ["src/App.jsx", "src/styles.css", "worker/index.js", "worker/index.test.js"];
         const contextFiles = [];
@@ -591,9 +592,8 @@ export default {
         }, 422);
 
         const branch = "ai-studio/task-" + Date.now().toString(36);
-        const base = await githubRequest(env, "/repos/" + GITHUB_REPO + "/git/ref/heads/main");
         await githubRequest(env, "/repos/" + GITHUB_REPO + "/git/refs", {
-          method: "POST", body: JSON.stringify({ ref: "refs/heads/" + branch, sha: base.object.sha })
+          method: "POST", body: JSON.stringify({ ref: "refs/heads/" + branch, sha: mainRef.object.sha })
         });
 
         const changed = [];
