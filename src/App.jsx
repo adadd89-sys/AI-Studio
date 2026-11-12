@@ -3,7 +3,7 @@ import {
   Activity, Bot, BrainCircuit, Check, ChevronDown, ChevronRight,
   CircleHelp, Code2, Command, FolderKanban, GitBranch, LayoutDashboard,
   MessageSquare, Plus, Send, Settings2, ShieldCheck, Sparkles, Terminal,
-  Users, Workflow, Zap, FileText, Save, RefreshCw, GitCommit, X
+  Users, Workflow, Zap, FileText, Save, RefreshCw, GitCommit, X, Gauge, BarChart3, MessageCircle
 } from 'lucide-react';
 
 const navigation = [
@@ -12,13 +12,15 @@ const navigation = [
   { label: 'Команда ИИ', icon: Users },
   { label: 'Процессы', icon: Workflow },
   { label: 'Код и файлы', icon: Code2 },
-  { label: 'Активность', icon: Activity }
+  { label: 'Активность', icon: Activity },
+  { label: 'Расход ресурсов', icon: BarChart3 }
 ];
 
 const agents = [
   { name: 'Gemini 4 Hydrogen', model: 'Google Gemini API · резерв: Gemini 3.8 Flash', role: 'Руководитель и координатор', tone: 'blue', initials: 'Ge', key: 'gemini', detail: 'Разбирает запрос, формирует техническое задание, распределяет работу и объединяет результаты.' },
   { name: 'Gemma 4 26B', model: 'Cloudflare Workers AI · @cf/google/gemma-4-26b-a4b-it', role: 'Аналитик и контроль качества', tone: 'green', initials: 'G', key: 'gemma', detail: 'Независимо проверяет планы и код, выявляет риски, ошибки и недостающие тесты.' },
-  { name: 'Qwen 3.8 27B', model: 'Cloudflare Workers AI · @cf/qwen/qwen3.8-27b', role: 'Основной разработчик', tone: 'violet', initials: 'Q', key: 'qwen', detail: 'Проектирует архитектуру, пишет и исправляет код. Следующий этап — автоматическое применение изменений в GitHub.' }
+  { name: 'Qwen 3.8 27B', model: 'Cloudflare Workers AI · @cf/qwen/qwen3.8-27b', role: 'Основной разработчик', tone: 'violet', initials: 'Q', key: 'qwen', detail: 'Проектирует архитектуру, пишет и исправляет код.' },
+  { name: 'Cohere North Mini Code', model: 'OpenRouter · cohere/north-mini-code:free', role: 'Дополнительный разработчик', tone: 'orange', initials: 'N', key: 'north', detail: 'Резервный кодовый агент. Нужен бесплатный ключ OpenRouter в секретах Cloudflare.' }
 ];
 
 
@@ -217,6 +219,15 @@ function CodeWorkspace() {
   </section>;
 }
 
+const DEFAULT_TEAM_SETTINGS = { intensity: 60, mode: 'normal', agents: { gemini: true, qwen: true, gemma: true, north: false } };
+
+function readTeamSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('ai-studio-team-settings') || 'null');
+    return { ...DEFAULT_TEAM_SETTINGS, ...(saved || {}), agents: { ...DEFAULT_TEAM_SETTINGS.agents, ...(saved?.agents || {}) } };
+  } catch { return DEFAULT_TEAM_SETTINGS; }
+}
+
 function App() {
   const [active, setActive] = useState('Обзор');
   const [task, setTask] = useState('');
@@ -235,6 +246,27 @@ function App() {
   const [qwenReview, setQwenReview] = useState(null);
   const [executionResult, setExecutionResult] = useState(null);
   const [reviewStatus, setReviewStatus] = useState('');
+  const [teamSettings, setTeamSettings] = useState(readTeamSettings);
+  const [usageEvents, setUsageEvents] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ai-studio-usage-events') || '[]'); } catch { return []; }
+  });
+  const [usagePeriod, setUsagePeriod] = useState('today');
+
+  useEffect(() => {
+    localStorage.setItem('ai-studio-team-settings', JSON.stringify(teamSettings));
+  }, [teamSettings]);
+
+  useEffect(() => {
+    localStorage.setItem('ai-studio-usage-events', JSON.stringify(usageEvents.slice(0, 300)));
+  }, [usageEvents]);
+
+  function updateTeamSetting(key, value) {
+    setTeamSettings(current => ({ ...current, [key]: value }));
+  }
+
+  function toggleAgent(key, enabled) {
+    setTeamSettings(current => ({ ...current, agents: { ...current.agents, [key]: enabled } }));
+  }
 
   useEffect(() => {
     let active = true;
@@ -282,7 +314,7 @@ function App() {
       const response = await fetch('/api/execute', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ task: value })
+        body: JSON.stringify({ task: value, teamSettings })
       });
       const started = await response.json();
       if (!response.ok) throw new Error(started.error || 'Не удалось запустить задачу.');
@@ -324,6 +356,12 @@ function App() {
         fallbackUsed: Boolean(data.fallbackUsed)
       });
       setExecutionResult(data);
+      setUsageEvents(current => [{
+        id: Date.now(), at: new Date().toISOString(), mode: teamSettings.mode,
+        intensity: teamSettings.intensity, agents: data.agentsUsed || Object.keys(teamSettings.agents).filter(key => teamSettings.agents[key]),
+        requests: data.usage?.requests ?? null, neurons: data.usage?.neurons ?? null,
+        task: value.slice(0, 160)
+      }, ...current].slice(0, 300));
       setQwenReview({ ok: true, review: data.qwenReview || 'Изменения подготовлены.' });
       setGemmaReview({ ok: true, review: data.gemmaReview || 'Проверка завершена.' });
       const count = (data.filesChanged || []).length;
@@ -347,6 +385,10 @@ function App() {
   }
 
   const title = active === 'Обзор' ? 'Рабочее пространство' : active;
+  const usageCutoff = usagePeriod === 'today' ? new Date(new Date().setHours(0,0,0,0)) : usagePeriod === 'week' ? new Date(Date.now() - 7 * 86400000) : new Date(Date.now() - 30 * 86400000);
+  const visibleUsage = usageEvents.filter(item => new Date(item.at) >= usageCutoff);
+  const trackedRequests = visibleUsage.reduce((sum, item) => sum + (Number.isFinite(item.requests) ? item.requests : (item.agents?.length || 0)), 0);
+  const trackedNeurons = visibleUsage.reduce((sum, item) => sum + (Number.isFinite(item.neurons) ? item.neurons : 0), 0);
   if (authState !== 'authenticated') {
     return <div className="login-screen"><form className="login-card" onSubmit={login}><div className="brand-mark"><BrainCircuit size={22} /></div><div className="eyebrow">ЗАЩИЩЁННЫЙ ДОСТУП</div><h1>AI Studio</h1><p>{authState === 'checking' ? 'Проверяем авторизацию…' : authState === 'setup' ? 'Авторизация ещё не настроена. Добавьте APP_PASSWORD и SESSION_SECRET в секреты Cloudflare Worker.' : authState === 'error' ? 'Не удалось связаться с сервером. Обновите страницу позже.' : 'Введите личный пароль, чтобы открыть рабочее пространство.'}</p>{authState === 'login' && <><input type="password" autoComplete="current-password" value={loginPassword} onChange={event => setLoginPassword(event.target.value)} placeholder="Пароль доступа" /><button className="primary-button" type="submit" disabled={!loginPassword || isLoggingIn}>{isLoggingIn ? 'Входим…' : 'Войти'} <Send size={15} /></button></>}{loginError && <div className="task-error">{loginError}</div>}</form></div>;
   }
@@ -389,7 +431,26 @@ function App() {
         </header>
 
         <div className="page-content">
-          {active === 'Код и файлы' ? <CodeWorkspace /> : <>
+          {active === 'Код и файлы' ? <CodeWorkspace /> : active === 'Настройки' ? <section className="settings-page">
+            <div className="section-heading"><div><div className="eyebrow">УПРАВЛЕНИЕ КОМАНДОЙ</div><h2>Настройки AI Studio</h2></div><Gauge size={22}/></div>
+            <div className="settings-card"><div className="settings-title"><div><strong>Интенсивность работы</strong><span>Меньше вызовов и короче анализ — экономнее расход ресурсов</span></div><b>{teamSettings.intensity}%</b></div>
+              <input className="intensity-slider" type="range" min="0" max="100" step="5" value={teamSettings.intensity} onChange={event => updateTeamSetting('intensity', Number(event.target.value))}/>
+              <div className="slider-labels"><span>Экономно</span><span>Сбалансированно</span><span>Максимум</span></div>
+              <div className="mode-options"><button className={teamSettings.mode === 'chat' ? 'mode-option selected' : 'mode-option'} onClick={() => updateTeamSetting('mode','chat')}><MessageCircle size={16}/><strong>Общение</strong><span>Короткие ответы без GitHub и разработки</span></button><button className={teamSettings.mode === 'normal' ? 'mode-option selected' : 'mode-option'} onClick={() => updateTeamSetting('mode','normal')}><Gauge size={16}/><strong>Обычная работа</strong><span>План, выполнение и нужные проверки</span></button><button className={teamSettings.mode === 'max' ? 'mode-option selected' : 'mode-option'} onClick={() => updateTeamSetting('mode','max')}><Zap size={16}/><strong>Максимальная нагрузка</strong><span>Полная команда и дополнительная проверка</span></button></div>
+            </div>
+            <div className="settings-card"><div className="settings-title"><div><strong>Участие агентов</strong><span>Отключённый агент не должен получать запросы</span></div></div>
+              <div className="agent-toggle-list">{agents.map(agent => <label className="agent-toggle" key={agent.key}><span className={'agent-avatar ' + agent.tone}>{agent.initials}</span><span><strong>{agent.name}</strong><small>{agent.model}</small></span><input type="checkbox" checked={Boolean(teamSettings.agents[agent.key])} onChange={event => toggleAgent(agent.key,event.target.checked)}/></label>)}</div>
+              <p className="settings-note">Cohere North Mini Code включается только после добавления OPENROUTER_API_KEY в секреты Cloudflare. Сам ключ сюда вводить не нужно.</p>
+            </div>
+            <div className="settings-save-note"><Check size={15}/> Настройки сохраняются на этом устройстве и применяются к следующим задачам.</div>
+          </section> : active === 'Расход ресурсов' ? <section className="usage-page">
+            <div className="section-heading"><div><div className="eyebrow">ЛИМИТЫ И АКТИВНОСТЬ</div><h2>Расход ресурсов</h2></div><BarChart3 size={22}/></div>
+            <div className="usage-period">{[['today','Сегодня'],['week','7 дней'],['month','30 дней']].map(([key,label]) => <button key={key} className={usagePeriod === key ? 'selected' : ''} onClick={() => setUsagePeriod(key)}>{label}</button>)}</div>
+            <div className="usage-metrics"><article><span>Запросы AI Studio</span><strong>{trackedRequests}</strong><small>По локальной истории приложения</small></article><article><span>Neurons</span><strong>{trackedNeurons || 'Нет данных'}</strong><small>Точное потребление смотрите в Cloudflare</small></article><article><span>Запуски задач</span><strong>{visibleUsage.length}</strong><small>На этом устройстве</small></article></div>
+            <div className="settings-card"><div className="settings-title"><div><strong>Лимит Cloudflare Workers AI</strong><span>Qwen и Gemma используют общий дневной пул</span></div></div><p className="settings-note">AI Studio пока не получает достоверное число оставшихся Neurons из Worker API. Не показываем оценку как фактический остаток.</p><a className="external-dashboard-link" href="https://dash.cloudflare.com/?to=/:account/workers/ai" target="_blank" rel="noreferrer">Открыть статистику Cloudflare ↗</a></div>
+            <div className="settings-card"><div className="settings-title"><div><strong>OpenRouter · North Mini Code</strong><span>Бесплатный уровень модели</span></div></div><p className="settings-note">Бесплатная квота OpenRouter зависит от действующих правил аккаунта. Здесь учитываются только вызовы, которые AI Studio сможет подтвердить; остаток аккаунта не предполагается.</p><a className="external-dashboard-link" href="https://openrouter.ai/activity" target="_blank" rel="noreferrer">Открыть активность OpenRouter ↗</a></div>
+            <div className="settings-card"><strong>История задач</strong>{visibleUsage.length ? <div className="usage-history">{visibleUsage.map(item => <div key={item.id}><span>{new Date(item.at).toLocaleString('ru-RU')}</span><strong>{item.task}</strong><small>{item.agents?.join(' · ') || 'Состав команды не записан'} · {item.intensity}%</small></div>)}</div> : <p className="settings-note">За выбранный период задач пока нет.</p>}</div>
+          </section> : <>
           <section className="welcome-row">
             <div><div className="eyebrow"><Sparkles size={14} /> ВАША AI-КОМАНДА</div><h1>{active === 'Обзор' ? 'Всё начинается с идеи.' : title}</h1><p>Ставьте задачу — команда ИИ поможет превратить её в готовый продукт.</p></div>
             <div className="system-status"><span className="status-pulse" /> Система готова к работе</div>
@@ -430,14 +491,14 @@ function App() {
             <div className="section-heading"><div><div className="eyebrow">ВАШИ СПЕЦИАЛИСТЫ</div><h2>Команда ИИ</h2></div><button className="subtle-button" onClick={() => setActive('Команда ИИ')}>Вся команда <ChevronRight size={15} /></button></div>
             <div className="agent-grid">
               {agents.map(agent => {
-                const configured = agent.key === 'gemini' ? Boolean(geminiHealth?.modelConfigured) : Boolean(geminiHealth?.qwenConfigured);
-                const result = agent.key === 'gemini' ? geminiCallStatus : agent.key === 'gemma' ? gemmaReview?.ok : qwenReview?.ok;
-                const failed = agent.key === 'gemini' ? geminiCallStatus === false : (agent.key === 'gemma' ? gemmaReview?.ok === false : qwenReview?.ok === false);
-                const status = result === true ? 'Ответ получен' : failed ? 'Ошибка вызова' : configured ? 'Подключение настроено · ждёт теста' : geminiHealth === null ? 'Проверяем подключение…' : 'Не настроено';
+                const configured = agent.key === 'gemini' ? Boolean(geminiHealth?.modelConfigured) : agent.key === 'north' ? Boolean(geminiHealth?.openrouterConfigured) : Boolean(geminiHealth?.qwenConfigured);
+                const result = agent.key === 'gemini' ? geminiCallStatus : agent.key === 'gemma' ? gemmaReview?.ok : agent.key === 'qwen' ? qwenReview?.ok : null;
+                const failed = agent.key === 'gemini' ? geminiCallStatus === false : (agent.key === 'gemma' ? gemmaReview?.ok === false : agent.key === 'qwen' ? qwenReview?.ok === false : false);
+                const status = !teamSettings.agents[agent.key] ? 'Отключён' : result === true ? 'Ответ получен' : failed ? 'Ошибка вызова' : configured ? 'Подключение настроено · ждёт теста' : geminiHealth === null ? 'Проверяем подключение…' : agent.key === 'north' ? 'Требуется OPENROUTER_API_KEY' : 'Не настроено';
                 return <article className="agent-card" key={agent.key}>
                   <div className="agent-card-top"><div className={'agent-avatar ' + agent.tone}>{agent.initials}</div><span className={'agent-status ' + (result === true ? 'is-working' : failed ? 'is-error' : 'is-configured')}><span /> {status}</span></div>
                   <h3>{agent.name}</h3><div className="agent-role">{agent.role}</div><div className="agent-model">{agent.model}</div><p>{agent.detail}</p>
-                  <div className="agent-card-bottom"><span><ShieldCheck size={14} /> {result === true ? 'Генерация подтверждена' : configured ? 'Провайдер настроен' : 'Требуется настройка'}</span><ChevronRight size={16} /></div>
+                  <div className="agent-card-bottom"><span><ShieldCheck size={14} /> {!teamSettings.agents[agent.key] ? 'Не участвует' : result === true ? 'Генерация подтверждена' : configured ? 'Провайдер настроен' : 'Требуется настройка'}</span><ChevronRight size={16} /></div>
                 </article>;
               })}
             </div>
