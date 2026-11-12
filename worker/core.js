@@ -836,7 +836,7 @@ export default {
           review = await reviewTeam(implementation.changes);
         }
         if (!review.approved) return json({
-          error: "Gemma не одобрила изменения. В GitHub ничего не записано.",
+          error: "Команда ревью не одобрила изменения. В GitHub ничего не записано.",
           plan, review, repairAttempted
         }, 422);
 
