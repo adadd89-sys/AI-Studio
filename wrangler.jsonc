@@ -14,7 +14,8 @@
   "vars": {
     "GEMINI_MODEL": "gemini-4-hydrogen",
     "GEMINI_FALLBACK_MODEL": "gemini-3.8-flash",
-    "GEMMA_MODEL": "@cf/google/gemma-4-26b-a4b-it"
+    "GEMMA_MODEL": "@cf/google/gemma-4-26b-a4b-it",
+    "QWEN_MODEL": "@cf/qwen/qwen3.8-27b"
   },
   "ai": {
     "binding": "AI"
