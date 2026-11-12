@@ -269,6 +269,11 @@ function App() {
   }
 
   useEffect(() => {
+    const telegram = window.Telegram?.WebApp;
+    if (telegram) { telegram.ready(); telegram.expand(); }
+  }, []);
+
+  useEffect(() => {
     let active = true;
     Promise.all([
       fetch('/api/health').then(response => response.ok ? response.json() : Promise.reject(new Error('Health check failed'))),
