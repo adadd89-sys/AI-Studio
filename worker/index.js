@@ -90,6 +90,7 @@ export default {
         ok: true,
         service: "ai-studio-api",
         modelConfigured: Boolean(env.GEMINI_API_KEY),
+        qwenConfigured: Boolean(env.GROQ_API_KEY),
         authConfigured: Boolean(env.APP_PASSWORD && env.SESSION_SECRET)
       });
     }
@@ -169,6 +170,73 @@ export default {
         });
       } catch {
         return json({ error: "Gemini вернул некорректный список моделей." }, 502);
+      }
+    }
+
+
+    if (url.pathname === "/api/agents/qwen-review" && request.method === "POST") {
+      if (!env.APP_PASSWORD || !env.SESSION_SECRET) {
+        return json({ error: "Авторизация ещё не настроена." }, 503);
+      }
+      if (!await isValidSession(request, env.SESSION_SECRET)) {
+        return json({ error: "Требуется вход в AI Studio." }, 401);
+      }
+      if (!env.GROQ_API_KEY) {
+        return json({ error: "Qwen API не подключён. Добавьте GROQ_API_KEY в секреты Cloudflare Worker." }, 503);
+      }
+
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: "Ожидается корректный JSON." }, 400);
+      }
+
+      const task = typeof body?.task === "string" ? body.task.trim() : "";
+      const plan = typeof body?.plan === "string" ? body.plan.trim() : "";
+      if (!task || !plan) return json({ error: "Нужны исходная задача и план для проверки." }, 400);
+      if (task.length > 6000 || plan.length > 12000) {
+        return json({ error: "Объём задачи или плана превышает допустимый лимит." }, 413);
+      }
+
+      const model = env.QWEN_MODEL || "qwen/qwen3.8-27b";
+      try {
+        const upstream = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "authorization": "Bearer " + env.GROQ_API_KEY,
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({
+            model,
+            messages: [
+              {
+                role: "system",
+                content: "Ты — независимый ИИ-архитектор и ревьюер команды AI Studio. Критически проверь план: найди пропуски, технические риски, зависимости и слабые места. Не соглашайся автоматически. Предложи конкретные улучшения и оцени готовность плана к исполнению. Отвечай по-русски, структурированно и кратко. Не утверждай, что работа уже выполнена."
+              },
+              {
+                role: "user",
+                content: "Исходная задача пользователя:\\n" + task + "\\n\\nПлан Gemini:\\n" + plan
+              }
+            ],
+            max_completion_tokens: 1200,
+            temperature: 0.2
+          })
+        });
+        if (!upstream.ok) {
+          if (upstream.status === 429) {
+            return json({ error: "Бесплатный лимит Qwen через Groq временно исчерпан. Попробуйте позже.", upstreamStatus: 429 }, 429);
+          }
+          return json({ error: "Groq/Qwen вернул ошибку. Проверьте доступность модели и API-ключ.", upstreamStatus: upstream.status }, 502);
+        }
+        const payload = await upstream.json();
+        const review = typeof payload?.choices?.[0]?.message?.content === "string"
+          ? payload.choices[0].message.content.trim()
+          : "";
+        if (!review) throw new Error("Empty model response");
+        return json({ ok: true, agent: "Qwen", model, review });
+      } catch {
+        return json({ error: "Не удалось связаться с Qwen через Groq. Проверьте соединение и доступность API." }, 502);
       }
     }
 
