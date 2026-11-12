@@ -1,4 +1,5 @@
 name: Deploy AI Studio test Worker
+# Re-run isolated deployment after Cloudflare credentials were added.
 
 on:
   push:
