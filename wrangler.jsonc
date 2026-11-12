@@ -19,5 +19,12 @@
   },
   "ai": {
     "binding": "AI"
-  }
+  },
+  "workflows": [
+    {
+      "name": "ai-studio-workflow",
+      "binding": "AI_STUDIO_WORKFLOW",
+      "class_name": "AIStudioWorkflow"
+    }
+  ]
 }
