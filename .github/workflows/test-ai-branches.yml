@@ -1,0 +1,44 @@
+name: Validate AI-generated branches
+
+on:
+  push:
+    branches:
+      - "ai-studio/**"
+    paths:
+      - "worker/**"
+      - "src/**"
+      - "public/**"
+      - "index.html"
+      - "vite.config.*"
+      - "wrangler.jsonc"
+      - "package.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-branch-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Test and build AI-generated changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout generated branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run Worker tests
+        run: npm test
+
+      - name: Build application
+        run: npm run build
