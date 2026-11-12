@@ -96,3 +96,13 @@
 .workspace-footnote{display:flex;align-items:flex-start;gap:7px;color:#818a9b;font-size:9px;line-height:1.6}
 .workspace-footnote svg{flex-shrink:0;margin-top:1px;color:#a99bf0}
 @media(max-width:760px){.code-layout{grid-template-columns:1fr}.file-browser{border-right:0;border-bottom:1px solid #303747}.file-list{max-height:220px}.code-editor textarea,.editor-empty{min-height:340px}.repo-toolbar{align-items:flex-start;flex-direction:column}.branch-create{width:100%}.branch-create input{flex:1;min-width:0;max-width:none}.code-workspace-heading{align-items:flex-start;flex-direction:column}}
+
+/* AI team integration states */
+.agent-model{font-size:8px;line-height:1.5;color:#777f91;overflow-wrap:anywhere;margin-top:5px}
+.agent-status{max-width:65%;white-space:normal;line-height:1.35}
+.agent-status.is-configured{color:#d8bd83}
+.agent-status.is-configured span{background:#d5a85d}
+.agent-status.is-working{color:#8fd1ad}
+.agent-status.is-working span{background:#54c99a;box-shadow:0 0 8px #54c99a88}
+.agent-status.is-error{color:#e49a95}
+.agent-status.is-error span{background:#df7770}
