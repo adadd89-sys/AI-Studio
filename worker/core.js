@@ -166,6 +166,7 @@ export default {
         service: "ai-studio-api",
         modelConfigured: Boolean(env.GEMINI_API_KEY),
         qwenConfigured: Boolean(env.AI),
+        openrouterConfigured: Boolean(env.OPENROUTER_API_KEY),
         githubConfigured: Boolean(env.GITHUB_TOKEN),
         authConfigured: Boolean(env.APP_PASSWORD && env.SESSION_SECRET)
       });
@@ -449,6 +450,56 @@ export default {
       }
     }
 
+
+
+    if (url.pathname === "/api/chat" && request.method === "POST") {
+      if (!env.APP_PASSWORD || !env.SESSION_SECRET) return json({ error: "Авторизация AI Studio не настроена." }, 503);
+      if (!await isValidSession(request, env.SESSION_SECRET)) return json({ error: "Требуется вход в AI Studio." }, 401);
+      if (!hasSameOrigin(request)) return json({ error: "Недопустимый источник запроса." }, 403);
+      const body = await request.json().catch(() => null);
+      const message = typeof body?.message === "string" ? body.message.trim() : "";
+      if (!message) return json({ error: "Напишите сообщение." }, 400);
+      if (message.length > 4000) return json({ error: "Сообщение слишком длинное. Максимум — 4000 символов." }, 413);
+      const raw = body?.teamSettings && typeof body.teamSettings === "object" ? body.teamSettings : {};
+      const enabled = raw.agents && typeof raw.agents === "object" ? raw.agents : {};
+      const agent = enabled.gemini !== false ? "gemini" : enabled.qwen !== false ? "qwen" : enabled.north === true ? "north" : enabled.gemma !== false ? "gemma" : null;
+      if (!agent) return json({ error: "Включите хотя бы одного ИИ-агента в настройках." }, 400);
+      const intensity = Math.max(0, Math.min(100, Number.isFinite(Number(raw.intensity)) ? Number(raw.intensity) : 20));
+      const history = Array.isArray(body?.history) ? body.history.slice(-12).filter(item => item && ["user","assistant"].includes(item.role) && typeof item.content === "string").map(item => ({ role: item.role, content: item.content.slice(0, 4000) })) : [];
+      const messages = [...history, { role: "user", content: message }];
+      try {
+        let reply = "";
+        if (agent === "gemini") {
+          if (!env.GEMINI_API_KEY) return json({ error: "Gemini включён, но GEMINI_API_KEY не настроен." }, 503);
+          const contents = messages.map(item => ({ role: item.role === "assistant" ? "model" : "user", parts: [{ text: item.content }] }));
+          const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(env.GEMINI_MODEL || "gemini-4-hydrogen") + ":generateContent?key=" + encodeURIComponent(env.GEMINI_API_KEY), {
+            method: "POST", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ contents, generationConfig: { temperature: 0.7, maxOutputTokens: intensity <= 20 ? 512 : 1200 } })
+          });
+          if (!response.ok) throw new Error("Gemini API вернул HTTP " + response.status);
+          const payload = await response.json();
+          reply = payload?.candidates?.[0]?.content?.parts?.map(part => part.text || "").join("").trim() || "";
+        } else if (agent === "qwen" || agent === "gemma") {
+          if (!env.AI) return json({ error: "Cloudflare Workers AI не настроен." }, 503);
+          const model = agent === "qwen" ? (env.QWEN_MODEL || "@cf/qwen/qwen3.8-27b") : (env.GEMMA_MODEL || "@cf/google/gemma-4-26b-a4b-it");
+          const result = await env.AI.run(model, { messages: [{ role: "system", content: "Ты — собеседник AI Studio. Отвечай естественно, по-русски, кратко и по существу. Не выполняй разработку, не вызывай инструменты и не утверждай, что совершил действия." }, ...messages], max_completion_tokens: intensity <= 20 ? 512 : 1200, temperature: 0.7 });
+          reply = result?.response || result?.choices?.[0]?.message?.content || result?.choices?.[0]?.message?.reasoning_content || "";
+        } else {
+          if (!env.OPENROUTER_API_KEY) return json({ error: "Cohere North Mini Code включён, но OPENROUTER_API_KEY не настроен." }, 503);
+          const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST", headers: { "content-type": "application/json", "authorization": "Bearer " + env.OPENROUTER_API_KEY, "http-referer": "https://ai-studio.sergey-adadd89.workers.dev", "x-title": "AI Studio" },
+            body: JSON.stringify({ model: "cohere/north-mini-code:free", max_tokens: intensity <= 20 ? 512 : 1200, messages: [{ role: "system", content: "Ты — собеседник AI Studio. Отвечай естественно, по-русски, кратко и по существу. Не утверждай, что совершил действия." }, ...messages] })
+          });
+          if (!response.ok) throw new Error("OpenRouter вернул HTTP " + response.status);
+          const payload = await response.json();
+          reply = payload?.choices?.[0]?.message?.content || payload?.choices?.[0]?.message?.reasoning_content || "";
+        }
+        if (!reply.trim()) throw new Error("Агент вернул пустой ответ.");
+        return json({ ok: true, reply: reply.trim(), agent, agentsUsed: [agent], usage: { requests: 1, neurons: null } });
+      } catch (error) {
+        return json({ error: error?.message || "Не удалось получить ответ агента." }, 502);
+      }
+    }
 
     if (url.pathname === "/api/execute-internal" && request.method === "POST") {
       let body;
