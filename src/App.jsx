@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Activity, Bot, BrainCircuit, Check, ChevronDown, ChevronRight,
   CircleHelp, Code2, Command, FolderKanban, GitBranch, LayoutDashboard,
@@ -29,6 +29,16 @@ function App() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [taskError, setTaskError] = useState('');
   const [lastPlan, setLastPlan] = useState(null);
+  const [geminiHealth, setGeminiHealth] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    fetch('/api/health')
+      .then(response => response.ok ? response.json() : Promise.reject(new Error('Health check failed')))
+      .then(data => { if (active) setGeminiHealth(data); })
+      .catch(() => { if (active) setGeminiHealth({ ok: false, modelConfigured: false }); });
+    return () => { active = false; };
+  }, []);
 
   const greeting = useMemo(() => new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long' }).format(new Date()), []);
 
@@ -122,7 +132,7 @@ function App() {
             <div className="section-heading"><div><div className="eyebrow">ВАШИ СПЕЦИАЛИСТЫ</div><h2>Команда ИИ</h2></div><button className="subtle-button" onClick={() => setActive('Команда ИИ')}>Вся команда <ChevronRight size={15} /></button></div>
             <div className="agent-grid">
               {agents.map(agent => <article className="agent-card" key={agent.name}>
-                <div className="agent-card-top"><div className={'agent-avatar ' + agent.tone}>{agent.initials}</div><span className="agent-status"><span /> Подключение не настроено</span></div>
+                <div className="agent-card-top"><div className={'agent-avatar ' + agent.tone}>{agent.initials}</div><span className="agent-status"><span /> {agent.name === 'Gemini' ? (geminiHealth === null ? 'Проверяем API…' : geminiHealth.modelConfigured ? 'API-ключ настроен' : 'Нужен API-ключ') : 'Ожидает интеграции'}</span></div>
                 <h3>{agent.name}</h3><div className="agent-role">{agent.role}</div><p>{agent.detail}</p>
                 <div className="agent-card-bottom"><span><ShieldCheck size={14} /> Роль назначена</span><ChevronRight size={16} /></div>
               </article>)}
