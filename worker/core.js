@@ -803,7 +803,7 @@ export default {
             headers: { "content-type": "application/json", "authorization": "Bearer " + env.OPENROUTER_API_KEY, "http-referer": "https://ai-studio.sergey-adadd89.workers.dev", "x-title": "AI Studio" },
             body: JSON.stringify({ model: "cohere/north-mini-code:free", temperature: 0.1, max_tokens: 1600,
               messages: [
-                { role: "system", content: "Ты — независимый ревьюер AI Studio. Проверь изменения на соответствие задаче, ошибки, безопасность и возможные регрессии. Верни только JSON: {\\"approved\\":true,\\"summary\\":\\"...\\",\\"issues\\":[\\"...\\"]}. Не утверждай, что запускал тесты." },
+                { role: "system", content: 'Ты — независимый ревьюер AI Studio. Проверь изменения на соответствие задаче, ошибки, безопасность и возможные регрессии. Верни только JSON: {"approved":true,"summary":"...","issues":["..."]}. Не утверждай, что запускал тесты.' },
                 { role: "user", content: reviewInput }
               ] })
           });
