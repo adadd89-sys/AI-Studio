@@ -44,16 +44,29 @@ export default {
       let origin;
       try { origin = new URL(request.headers.get("origin") || ""); } catch { return json({ error: "Недопустимый источник запроса." }, 403); }
       if (origin.host !== url.host) return json({ error: "Недопустимый источник запроса." }, 403);
-      if (!env.GEMINI_API_KEY) return json({ error: "Gemini API не подключён." }, 503);
-      if (!env.AI) return json({ error: "Workers AI не подключён. Нужны Qwen и Gemma." }, 503);
       if (!env.GITHUB_TOKEN) return json({ error: "GitHub не подключён. Проверьте GITHUB_TOKEN." }, 503);
       if (!env.AI_STUDIO_WORKFLOW) return json({ error: "Cloudflare Workflow не настроен. Проверьте deployment конфигурацию." }, 503);
       const body = await request.json().catch(() => null);
       const task = typeof body?.task === "string" ? body.task.trim() : "";
+      const rawSettings = body?.teamSettings && typeof body.teamSettings === "object" ? body.teamSettings : {};
+      const teamSettings = {
+        intensity: Math.max(0, Math.min(100, Number.isFinite(Number(rawSettings.intensity)) ? Math.round(Number(rawSettings.intensity) / 5) * 5 : 60)),
+        mode: ["chat", "normal", "max"].includes(rawSettings.mode) ? rawSettings.mode : "normal",
+        agents: {
+          gemini: rawSettings.agents?.gemini !== false,
+          qwen: rawSettings.agents?.qwen !== false,
+          gemma: rawSettings.agents?.gemma !== false,
+          north: rawSettings.agents?.north === true
+        }
+      };
+      if (!teamSettings.agents.qwen && !teamSettings.agents.north) return json({ error: "Включите Qwen или Cohere North Mini Code — нужен хотя бы один разработчик." }, 400);
+      if (teamSettings.agents.gemini && !env.GEMINI_API_KEY) return json({ error: "Gemini включён, но GEMINI_API_KEY не настроен." }, 503);
+      if ((teamSettings.agents.qwen || teamSettings.agents.gemma) && !env.AI) return json({ error: "Для включённых Qwen/Gemma требуется Cloudflare Workers AI." }, 503);
+      if (teamSettings.agents.north && !env.OPENROUTER_API_KEY) return json({ error: "Cohere North Mini Code включён, но OPENROUTER_API_KEY ещё не добавлен в секреты Cloudflare." }, 503);
       if (!task) return json({ error: "Опишите задачу." }, 400);
       if (task.length > 6000) return json({ error: "Задача слишком длинная. Максимум — 6000 символов." }, 413);
       try {
-        const instance = await env.AI_STUDIO_WORKFLOW.create({ params: { task } });
+        const instance = await env.AI_STUDIO_WORKFLOW.create({ params: { task, teamSettings } });
         return json({ ok: true, jobId: await instance.id, status: "queued" }, 202);
       } catch (error) {
         return json({ error: "Не удалось создать асинхронную задачу.", detail: error?.message || null }, 502);
