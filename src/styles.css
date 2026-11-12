@@ -46,3 +46,12 @@
 .review-inputs textarea:focus{border-color:#7565c3;box-shadow:0 0 0 3px #7968c31c}
 .final-review-actions{justify-content:space-between}
 @media(max-width:650px){.review-inputs{grid-template-columns:1fr}.review-kit-heading{align-items:flex-start;flex-direction:column}}
+
+
+.agent-reviews{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.agent-review{min-width:0;border:1px solid #303747;border-radius:8px;background:#10151e;padding:11px}
+.agent-review strong{display:block;color:#cfc9f4;font-size:9px;margin-bottom:7px}
+.agent-review p{white-space:pre-wrap;color:#c2c8d4;font-size:9px;line-height:1.6;margin:0}
+.agent-review>span{font-size:9px;color:#8b92a2}
+.agent-review .review-error{color:#e5a29b}
+@media(max-width:650px){.agent-reviews{grid-template-columns:1fr}}
