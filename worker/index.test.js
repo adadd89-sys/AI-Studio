@@ -459,6 +459,32 @@ describe("AI Studio Worker", () => {
     } finally { globalThis.fetch = originalFetch; }
   });
 
+
+  it("routes lightweight chat to Cohere North Mini Code when it is the enabled agent", async () => {
+    const cookie = await getSessionCookie();
+    const originalFetch = globalThis.fetch;
+    let sentModel = "";
+    globalThis.fetch = async (url, options) => {
+      assert.match(String(url), /openrouter\.ai\/api\/v1\/chat\/completions/);
+      sentModel = JSON.parse(options.body).model;
+      return new Response(JSON.stringify({ choices: [{ message: { content: "Привет! Я North." } }] }), {
+        status: 200, headers: { "content-type": "application/json" }
+      });
+    };
+    try {
+      const response = await worker.fetch(new Request("https://studio.test/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+        body: JSON.stringify({ message: "Привет", teamSettings: { mode: "chat", agents: { gemini: false, qwen: false, gemma: false, north: true } } })
+      }), { ...env, OPENROUTER_API_KEY: "test-openrouter-key" });
+      assert.equal(response.status, 200);
+      const result = await response.json();
+      assert.equal(result.agent, "north");
+      assert.equal(result.reply, "Привет! Я North.");
+      assert.equal(sentModel, "cohere/north-mini-code:free");
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
   it("rejects lightweight chat without an enabled agent", async () => {
     const cookie = await getSessionCookie();
     const response = await worker.fetch(new Request("https://studio.test/api/chat", {
