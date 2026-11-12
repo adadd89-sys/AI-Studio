@@ -279,10 +279,18 @@ function App() {
     Promise.all([
       fetch('/api/health').then(response => response.ok ? response.json() : Promise.reject(new Error('Health check failed'))),
       fetch('/api/session').then(response => response.ok ? response.json() : Promise.reject(new Error('Session check failed')))
-    ]).then(([health, session]) => {
+    ]).then(async ([health, session]) => {
       if (!active) return;
       setGeminiHealth(health);
-      setAuthState(!session.authConfigured ? 'setup' : session.authenticated ? 'authenticated' : 'login');
+      if (session.authenticated) { setAuthState('authenticated'); return; }
+      const telegram = window.Telegram?.WebApp;
+      if (telegram?.initData && health.telegramAuthConfigured) {
+        try {
+          const response = await fetch('/api/telegram-login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ initData: telegram.initData }) });
+          if (response.ok) { if (active) setAuthState('authenticated'); return; }
+        } catch { /* Fall back to the existing password login. */ }
+      }
+      if (active) setAuthState(health.authConfigured ? 'login' : 'setup');
     }).catch(() => { if (active) { setGeminiHealth({ ok: false, modelConfigured: false }); setAuthState('error'); } });
     return () => { active = false; };
   }, []);
