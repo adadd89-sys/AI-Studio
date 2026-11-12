@@ -3,7 +3,7 @@ import {
   Activity, Bot, BrainCircuit, Check, ChevronDown, ChevronRight,
   CircleHelp, Code2, Command, FolderKanban, GitBranch, LayoutDashboard,
   MessageSquare, Plus, Send, Settings2, ShieldCheck, Sparkles, Terminal,
-  Users, Workflow, Zap, FileText, Save, RefreshCw, GitCommit, GitPlus, X
+  Users, Workflow, Zap, FileText, Save, RefreshCw, GitCommit, X
 } from 'lucide-react';
 
 const navigation = [
