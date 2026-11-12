@@ -59,6 +59,10 @@ npx wrangler secret put GEMINI_API_KEY
 
 The default model is `gemini-3.8-flash`. Google currently lists free input and output tokens for this model on the Gemini API Free Tier, subject to rate limits and availability. Review Google's current pricing and data-use terms before sending private or sensitive project information. Review Google's current pricing and data-use terms before sending private or sensitive project information.
 
+## Gemini model availability check
+
+After deployment and login, open `/api/models/check` to check whether the API key can see `gemini-4-hydrogen` and whether the model advertises `generateContent`. This uses the read-only Models list endpoint; it does not generate text or establish whether the model is free for the project. The app keeps `gemini-3.8-flash` as its default unless the owner deliberately changes the model configuration.
+
 ## Deployment
 
 After authenticating Wrangler with the Cloudflare account:
