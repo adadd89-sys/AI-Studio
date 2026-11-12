@@ -172,6 +172,59 @@ export default {
       }
     }
 
+    if (url.pathname === "/api/agents/gemma-review" && request.method === "POST") {
+      if (!env.APP_PASSWORD || !env.SESSION_SECRET) {
+        return json({ error: "Авторизация ещё не настроена." }, 503);
+      }
+      if (!await isValidSession(request, env.SESSION_SECRET)) {
+        return json({ error: "Требуется вход в AI Studio." }, 401);
+      }
+      if (!env.AI) {
+        return json({ error: "Workers AI не подключён. Проверьте AI binding в Cloudflare." }, 503);
+      }
+
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: "Ожидается корректный JSON." }, 400);
+      }
+
+      const task = typeof body?.task === "string" ? body.task.trim() : "";
+      const plan = typeof body?.plan === "string" ? body.plan.trim() : "";
+      if (!task || !plan) return json({ error: "Нужны исходная задача и план для проверки." }, 400);
+      if (task.length > 6000 || plan.length > 12000) {
+        return json({ error: "Объём задачи или плана превышает допустимый лимит." }, 413);
+      }
+
+      const model = env.GEMMA_MODEL || "@cf/google/gemma-4-26b-a4b-it";
+      try {
+        const result = await env.AI.run(model, {
+          messages: [
+            {
+              role: "system",
+              content: "Ты — независимый технический аналитик и тестировщик AI Studio. Проверь план критически: найди пропуски, технические риски, скрытые зависимости и критерии готовности. Не соглашайся автоматически с исходным планом. Предложи конкретные исправления. Ответь по-русски, структурированно и кратко."
+            },
+            {
+              role: "user",
+              content: "Исходная задача пользователя:\\n" + task + "\\n\\nПлан, который нужно проверить:\\n" + plan
+            }
+          ],
+          max_completion_tokens: 1200,
+          temperature: 0.2
+        });
+        const review = typeof result?.response === "string"
+          ? result.response.trim()
+          : typeof result?.choices?.[0]?.message?.content === "string"
+            ? result.choices[0].message.content.trim()
+            : "";
+        if (!review) throw new Error("Empty model response");
+        return json({ ok: true, agent: "Gemma", model, review });
+      } catch {
+        return json({ error: "Gemma не смогла выполнить проверку. Возможно, временно исчерпан бесплатный лимит Workers AI или модель недоступна." }, 502);
+      }
+    }
+
     if (url.pathname === "/api/plan" && request.method === "POST") {
       if (!env.APP_PASSWORD || !env.SESSION_SECRET) {
         return json({ error: "Авторизация ещё не настроена. Добавьте APP_PASSWORD и SESSION_SECRET в секреты Worker." }, 503);
