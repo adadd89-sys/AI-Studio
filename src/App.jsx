@@ -26,16 +26,36 @@ function App() {
   const [task, setTask] = useState('');
   const [tasks, setTasks] = useState([]);
   const [showAll, setShowAll] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [taskError, setTaskError] = useState('');
+  const [lastPlan, setLastPlan] = useState(null);
 
   const greeting = useMemo(() => new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long' }).format(new Date()), []);
 
-  function submitTask(event) {
+  async function submitTask(event) {
     event.preventDefault();
     const value = task.trim();
-    if (!value) return;
-    setTasks(current => [{ id: Date.now(), title: value, status: 'Черновик', time: 'Только что' }, ...current]);
-    setTask('');
-    setActive('Процессы');
+    if (!value || isSubmitting) return;
+    setIsSubmitting(true);
+    setTaskError('');
+    setLastPlan(null);
+    try {
+      const response = await fetch('/api/plan', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ task: value })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Не удалось составить план.');
+      setLastPlan({ title: value, ...data.plan, model: data.model });
+      setTasks(current => [{ id: Date.now(), title: value, status: 'План готов', time: 'Только что' }, ...current]);
+      setTask('');
+      setActive('Процессы');
+    } catch (error) {
+      setTaskError(error.message || 'Не удалось связаться с сервером.');
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   const title = active === 'Обзор' ? 'Рабочее пространство' : active;
@@ -87,8 +107,15 @@ function App() {
             <div className="task-panel-heading"><div className="task-icon"><Command size={18} /></div><div><h2>Новая задача</h2><p>Опишите, что нужно создать или улучшить</p></div><span className="task-step">01 / ЗАПУСК</span></div>
             <form onSubmit={submitTask}>
               <textarea value={task} onChange={e => setTask(e.target.value)} placeholder="Например: создай Telegram-бота для записи клиентов, продумай архитектуру, напиши код и проверь его..." rows={3} />
-              <div className="composer-footer"><div className="composer-hint"><Sparkles size={14} /> ИИ-команда предложит план перед выполнением</div><button className="primary-button" type="submit" disabled={!task.trim()}>Поставить задачу <Send size={15} /></button></div>
+              <div className="composer-footer"><div className="composer-hint"><Sparkles size={14} /> Gemini составит план перед выполнением</div><button className="primary-button" type="submit" disabled={!task.trim() || isSubmitting}>{isSubmitting ? 'Анализируем...' : 'Составить план'} <Send size={15} /></button></div>
             </form>
+            {taskError && <div className="task-error" role="alert">{taskError}</div>}
+            {lastPlan && <div className="generated-plan">
+              <div className="plan-header"><div><span className="eyebrow">ПЛАН ОТ GEMINI</span><h3>{lastPlan.summary}</h3></div><span className="plan-model">{lastPlan.model}</span></div>
+              <ol>{lastPlan.steps.map((step, index) => <li key={index}>{step}</li>)}</ol>
+              {lastPlan.risks?.length > 0 && <div className="plan-notes"><strong>Риски для проверки</strong>{lastPlan.risks.map((risk, index) => <span key={index}>{risk}</span>)}</div>}
+              {lastPlan.questions?.length > 0 && <div className="plan-notes"><strong>Нужно уточнить</strong>{lastPlan.questions.map((question, index) => <span key={index}>{question}</span>)}</div>}
+            </div>}
           </section>
 
           <section className="section-block">
