@@ -75,6 +75,29 @@ describe("AI Studio Worker", () => {
     assert.equal((await session.json()).authenticated, true);
   });
 
+
+  it("rejects validly signed Telegram initData older than ten minutes", async () => {
+    const botToken = "123456:telegram-test-token";
+    const entries = [
+      ["auth_date", String(Math.floor(Date.now() / 1000) - 601)],
+      ["query_id", "AAE-stale-query"],
+      ["user", JSON.stringify({ id: 987654321, first_name: "Test" })]
+    ];
+    const checkString = [...entries].sort(([left],[right]) => left.localeCompare(right)).map(([key,value]) => key + "=" + value).join("\n");
+    const webAppKey = await crypto.subtle.importKey("raw", new TextEncoder().encode("WebAppData"), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const secret = await crypto.subtle.sign("HMAC", webAppKey, new TextEncoder().encode(botToken));
+    const validationKey = await crypto.subtle.importKey("raw", secret, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const digest = new Uint8Array(await crypto.subtle.sign("HMAC", validationKey, new TextEncoder().encode(checkString)));
+    const hash = [...digest].map(byte => byte.toString(16).padStart(2, "0")).join("");
+    const initData = new URLSearchParams([...entries, ["hash", hash]]).toString();
+    const response = await worker.fetch(new Request("https://studio.test/api/telegram-login", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://studio.test" },
+      body: JSON.stringify({ initData })
+    }), { SESSION_SECRET: env.SESSION_SECRET, TELEGRAM_BOT_TOKEN: botToken });
+    assert.equal(response.status, 401);
+  });
+
   it("rejects tampered Telegram Mini App initData", async () => {
     const response = await worker.fetch(new Request("https://studio.test/api/telegram-login", {
       method: "POST",
