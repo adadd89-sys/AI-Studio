@@ -34,6 +34,9 @@ function App() {
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [deepSeekReview, setDeepSeekReview] = useState('');
+  const [chatGptReview, setChatGptReview] = useState('');
+  const [reviewCopyStatus, setReviewCopyStatus] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -65,6 +68,47 @@ function App() {
     finally { setIsLoggingIn(false); }
   }
 
+  function buildReviewPrompt(agent) {
+    if (!lastPlan) return '';
+    return [
+      'Ты — независимый участник команды AI Studio. Проведи критическую проверку плана, не переписывай его без необходимости.',
+      'Задача пользователя: ' + lastPlan.title,
+      'План Gemini: ' + lastPlan.summary,
+      'Шаги: ' + lastPlan.steps.map((step, index) => (index + 1) + '. ' + step).join('\n'),
+      'Риски: ' + (lastPlan.risks || []).join('; '),
+      'Открытые вопросы: ' + (lastPlan.questions || []).join('; '),
+      'Твоя роль: ' + agent,
+      'Ответь по пунктам: 1) что верно; 2) ошибки и пропуски; 3) конкретные улучшения; 4) итоговая оценка плана. Не утверждай, что код или проект уже созданы.'
+    ].join('\n\n');
+  }
+
+  async function copyReviewPrompt(agent) {
+    try {
+      await navigator.clipboard.writeText(buildReviewPrompt(agent));
+      setReviewCopyStatus('Запрос для ' + agent + ' скопирован.');
+    } catch {
+      setReviewCopyStatus('Не удалось скопировать. Проверьте разрешение браузера на буфер обмена.');
+    }
+  }
+
+  async function copyFinalPrompt() {
+    const prompt = [
+      'Ты — координатор AI Studio. Сопоставь план Gemini и независимые отзывы DeepSeek и ChatGPT.',
+      'Задача: ' + (lastPlan?.title || ''),
+      'План Gemini: ' + (lastPlan?.summary || ''),
+      'Шаги: ' + (lastPlan?.steps || []).join('; '),
+      'Отзыв DeepSeek: ' + (deepSeekReview || 'Не предоставлен'),
+      'Отзыв ChatGPT: ' + (chatGptReview || 'Не предоставлен'),
+      'Сформируй единое решение: согласованные выводы, спорные моменты, исправленный план и следующий конкретный шаг. Не выдумывай выполненную работу.'
+    ].join('\n\n');
+    try {
+      await navigator.clipboard.writeText(prompt);
+      setReviewCopyStatus('Итоговый запрос скопирован.');
+    } catch {
+      setReviewCopyStatus('Не удалось скопировать. Проверьте разрешение браузера на буфер обмена.');
+    }
+  }
+
   async function submitTask(event) {
     event.preventDefault();
     const value = task.trim();
@@ -72,6 +116,9 @@ function App() {
     setIsSubmitting(true);
     setTaskError('');
     setLastPlan(null);
+    setDeepSeekReview('');
+    setChatGptReview('');
+    setReviewCopyStatus('');
     try {
       const response = await fetch('/api/plan', {
         method: 'POST',
@@ -152,6 +199,22 @@ function App() {
               <ol>{lastPlan.steps.map((step, index) => <li key={index}>{step}</li>)}</ol>
               {lastPlan.risks?.length > 0 && <div className="plan-notes"><strong>Риски для проверки</strong>{lastPlan.risks.map((risk, index) => <span key={index}>{risk}</span>)}</div>}
               {lastPlan.questions?.length > 0 && <div className="plan-notes"><strong>Нужно уточнить</strong>{lastPlan.questions.map((question, index) => <span key={index}>{question}</span>)}</div>}
+              <div className="review-kit">
+                <div className="review-kit-heading"><strong>Независимая проверка команды</strong><span>Бесплатный ручной режим — без платных API</span></div>
+                <p>Передай один и тот же план двум независимым ИИ. Затем вставь их отзывы сюда для общего разбора.</p>
+                <div className="review-actions">
+                  <button type="button" onClick={() => copyReviewPrompt('DeepSeek')}>Скопировать запрос для DeepSeek</button>
+                  <button type="button" onClick={() => copyReviewPrompt('ChatGPT')}>Скопировать запрос для ChatGPT</button>
+                </div>
+                <div className="review-inputs">
+                  <label>Ответ DeepSeek<textarea value={deepSeekReview} onChange={event => setDeepSeekReview(event.target.value)} placeholder="Вставь сюда результат проверки DeepSeek…" rows={3} /></label>
+                  <label>Ответ ChatGPT<textarea value={chatGptReview} onChange={event => setChatGptReview(event.target.value)} placeholder="Вставь сюда независимый разбор ChatGPT…" rows={3} /></label>
+                </div>
+                <div className="review-actions final-review-actions">
+                  <button type="button" onClick={copyFinalPrompt} disabled={!deepSeekReview.trim() && !chatGptReview.trim()}>Скопировать запрос на итоговый разбор</button>
+                  {reviewCopyStatus && <span role="status">{reviewCopyStatus}</span>}
+                </div>
+              </div>
             </div>}
           </section>
 
