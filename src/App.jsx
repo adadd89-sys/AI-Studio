@@ -28,6 +28,8 @@ function CodeWorkspace() {
   const [files, setFiles] = useState([]);
   const [selectedPath, setSelectedPath] = useState('');
   const [fileContent, setFileContent] = useState('');
+  const [originalContent, setOriginalContent] = useState('');
+  const [showDiff, setShowDiff] = useState(false);
   const [fileSha, setFileSha] = useState(null);
   const [newBranch, setNewBranch] = useState('ai-studio/my-changes');
   const [newFilePath, setNewFilePath] = useState('');
@@ -77,6 +79,8 @@ function CodeWorkspace() {
     try {
       const data = await api('/api/github/file?ref=' + encodeURIComponent(branch) + '&path=' + encodeURIComponent(path));
       setFileContent(data.content);
+      setOriginalContent(data.content);
+      setShowDiff(false);
       setFileSha(data.sha);
     } catch (err) {
       setError(err.message || 'Не удалось открыть файл.');
@@ -118,10 +122,38 @@ function CodeWorkspace() {
         body: JSON.stringify({ path: selectedPath, branch, content: fileContent, sha: fileSha, message: 'Update ' + selectedPath })
       });
       setFileSha(data.sha);
+      setOriginalContent(fileContent);
+      setShowDiff(false);
       setNotice('Изменения сохранены в ветку ' + branch + '. Коммит: ' + (data.commit || '').slice(0, 7));
       await loadWorkspace(branch);
     } catch (err) {
       setError(err.message || 'Не удалось сохранить файл.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteFile() {
+    if (!selectedPath || branch === 'main' || busy) return;
+    if (!window.confirm('Удалить файл ' + selectedPath + ' из ветки ' + branch + '?')) return;
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      await api('/api/github/file', {
+        method: 'DELETE',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ path: selectedPath, branch, sha: fileSha })
+      });
+      setNotice('Файл ' + selectedPath + ' удалён из ветки ' + branch + '.');
+      setSelectedPath('');
+      setFileContent('');
+      setOriginalContent('');
+      setFileSha(null);
+      setShowDiff(false);
+      await loadWorkspace(branch);
+    } catch (err) {
+      setError(err.message || 'Не удалось удалить файл.');
     } finally {
       setBusy(false);
     }
@@ -176,12 +208,12 @@ function CodeWorkspace() {
           {!files.length && <div className="workspace-empty">Файлы не найдены.</div>}
         </aside>
         <section className="code-editor">
-          <div className="editor-toolbar"><strong>{selectedPath || 'Выберите файл слева'}</strong><button onClick={saveFile} disabled={!selectedPath || branch === 'main' || busy}><Save size={14}/> Сохранить в GitHub</button></div>
-          {selectedPath ? <textarea spellCheck="false" value={fileContent} onChange={event => setFileContent(event.target.value)} readOnly={branch === 'main'} aria-label="Содержимое файла"/> : <div className="workspace-empty editor-empty">Выберите текстовый файл, чтобы просмотреть или отредактировать его.</div>}
+          <div className="editor-toolbar"><strong>{selectedPath || 'Выберите файл слева'}</strong><div className="editor-actions"><button onClick={() => setShowDiff(value => !value)} disabled={!selectedPath || busy}>{showDiff ? 'Редактор' : 'Сравнить'}</button><button className="delete-file-button" onClick={deleteFile} disabled={!selectedPath || branch === 'main' || busy}><X size={14}/> Удалить</button><button onClick={saveFile} disabled={!selectedPath || branch === 'main' || busy}><Save size={14}/> Сохранить в GitHub</button></div></div>
+          {selectedPath ? (showDiff ? <div className="diff-view"><div className="diff-column"><strong>Версия в GitHub</strong><pre>{originalContent || ' '}</pre></div><div className="diff-column"><strong>Текущая версия</strong><pre>{fileContent || ' '}</pre></div></div> : <textarea spellCheck="false" value={fileContent} onChange={event => setFileContent(event.target.value)} readOnly={branch === 'main'} aria-label="Содержимое файла"/>) : <div className="workspace-empty editor-empty">Выберите текстовый файл, чтобы просмотреть или отредактировать его.</div>}
           {busy && <div className="editor-busy">Выполняем запрос…</div>}
         </section>
       </div>}
-    <div className="workspace-footnote"><GitCommit size={13}/> Сейчас доступны просмотр, создание файлов, редактирование и коммиты в отдельной ветке. Diff, удаление файлов и Pull Request добавим следующим этапом.</div>
+    <div className="workspace-footnote"><GitCommit size={13}/> Доступны просмотр, сравнение версий, создание, редактирование и удаление файлов, а также коммиты только в отдельной ветке.</div>
   </section>;
 }
 
