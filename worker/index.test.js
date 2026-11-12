@@ -355,6 +355,54 @@ describe("AI Studio Worker", () => {
     }
   });
 
+  it("rejects file deletion from main", async () => {
+    const cookie = await getSessionCookie();
+    const response = await worker.fetch(new Request("https://studio.test/api/github/file", {
+      method: "DELETE",
+      headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+      body: JSON.stringify({ path: "README.md", branch: "main", sha: "a".repeat(40) })
+    }), { ...env, GITHUB_TOKEN: "test-token" });
+    assert.equal(response.status, 403);
+  });
+
+  it("deletes a file only from an AI Studio branch using its current SHA", async () => {
+    const originalFetch = globalThis.fetch;
+    let requestedUrl = "";
+    let requestBody = null;
+    globalThis.fetch = async (url, options) => {
+      requestedUrl = String(url);
+      requestBody = JSON.parse(options.body);
+      return new Response(JSON.stringify({ commit: { sha: "d".repeat(40) } }), {
+        status: 200, headers: { "content-type": "application/json" }
+      });
+    };
+    try {
+      const cookie = await getSessionCookie();
+      const response = await worker.fetch(new Request("https://studio.test/api/github/file", {
+        method: "DELETE",
+        headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+        body: JSON.stringify({ path: "src/old.js", branch: "ai-studio/task-1", sha: "a".repeat(40) })
+      }), { ...env, GITHUB_TOKEN: "test-token" });
+      assert.equal(response.status, 200);
+      assert.equal((await response.json()).commit, "d".repeat(40));
+      assert.equal(requestBody.branch, "ai-studio/task-1");
+      assert.equal(requestBody.sha, "a".repeat(40));
+      assert.match(requestedUrl, /contents\/src\/old\.js$/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("requires the current file SHA before deletion", async () => {
+    const cookie = await getSessionCookie();
+    const response = await worker.fetch(new Request("https://studio.test/api/github/file", {
+      method: "DELETE",
+      headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+      body: JSON.stringify({ path: "src/old.js", branch: "ai-studio/task-1", sha: null })
+    }), { ...env, GITHUB_TOKEN: "test-token" });
+    assert.equal(response.status, 400);
+  });
+
   it("returns a rate-limit message when Gemini responds with 429", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () => new Response("{}", { status: 429 });
