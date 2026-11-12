@@ -193,29 +193,51 @@ export default {
         return json({ error: "Gemini пока не подключён. Добавьте GEMINI_API_KEY в секреты Worker." }, 503);
       }
 
-      const model = env.GEMINI_MODEL || "gemini-3.8-flash";
-      let upstream;
-      try {
-        upstream = await fetch(
+      const primaryModel = env.GEMINI_MODEL || "gemini-3.8-flash";
+      const fallbackModel = env.GEMINI_FALLBACK_MODEL || "gemini-3.8-flash";
+      const requestBody = JSON.stringify({
+        contents: [{ role: "user", parts: [{ text:
+          "Ты — технический координатор AI Studio. Разбей запрос пользователя на понятный план разработки. Верни только JSON с полями summary (строка), steps (массив из 3–7 коротких строк), risks (массив строк), questions (массив строк). Не утверждай, что работа уже выполнена. Запрос: " + task
+        }] }],
+        generationConfig: { responseMimeType: "application/json", temperature: 0.2 }
+      });
+
+      async function callModel(model) {
+        return fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`,
           {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              contents: [{ role: "user", parts: [{ text:
-                "Ты — технический координатор AI Studio. Разбей запрос пользователя на понятный план разработки. Верни только JSON с полями summary (строка), steps (массив из 3–7 коротких строк), risks (массив строк), questions (массив строк). Не утверждай, что работа уже выполнена. Запрос: " + task
-              }] }],
-              generationConfig: { responseMimeType: "application/json", temperature: 0.2 }
-            })
+            body: requestBody
           }
         );
+      }
+
+      let model = primaryModel;
+      let fallbackUsed = false;
+      let upstream;
+      try {
+        upstream = await callModel(primaryModel);
+        const retryableStatuses = [429, 500, 502, 503, 504];
+        if (!upstream.ok && retryableStatuses.includes(upstream.status) && fallbackModel !== primaryModel) {
+          model = fallbackModel;
+          fallbackUsed = true;
+          upstream = await callModel(fallbackModel);
+        }
       } catch {
-        return json({ error: "Не удалось связаться с Gemini. Попробуйте позже." }, 502);
+        return json({ error: "Не удалось связаться с Gemini. Сетевой сбой не повторяется автоматически, чтобы избежать дублирования запроса." }, 502);
       }
 
       if (!upstream.ok) {
         const status = upstream.status === 429 ? 429 : 502;
-        return json({ error: status === 429 ? "Достигнут лимит бесплатных запросов Gemini. Попробуйте позже." : "Gemini вернул ошибку. Проверьте настройки модели и API-ключа." }, status);
+        return json({
+          error: status === 429
+            ? "Лимит исчерпан и резервная модель тоже недоступна. Попробуйте позже."
+            : "Основная и/или резервная модель Gemini вернула ошибку. Проверьте настройки и доступность моделей.",
+          model,
+          fallbackUsed,
+          upstreamStatus: upstream.status
+        }, status);
       }
 
       let payload;
@@ -225,9 +247,9 @@ export default {
         if (!raw) throw new Error("Empty response");
         const plan = JSON.parse(raw);
         if (typeof plan.summary !== "string" || !Array.isArray(plan.steps)) throw new Error("Invalid plan");
-        return json({ plan, model });
+        return json({ plan, model, primaryModel, fallbackUsed });
       } catch {
-        return json({ error: "Gemini вернул ответ в неожиданном формате. Попробуйте переформулировать задачу." }, 502);
+        return json({ error: "Gemini вернул ответ в неожиданном формате. Попробуйте переформулировать задачу.", model, fallbackUsed }, 502);
       }
     }
 
