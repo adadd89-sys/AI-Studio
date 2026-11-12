@@ -178,6 +178,55 @@ describe("AI Studio Worker", () => {
     }
   });
 
+  it("rejects Gemma reviews without a session", async () => {
+    const response = await worker.fetch(new Request("https://studio.test/api/agents/gemma-review", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ task: "Создай сайт", plan: "Сделать сайт" })
+    }), { ...env, AI: { run: async () => ({ response: "ok" }) } });
+    assert.equal(response.status, 401);
+  });
+
+  it("returns a structured review from Gemma through Workers AI", async () => {
+    const cookie = await getSessionCookie();
+    let calledModel = "";
+    let calledMessages = [];
+    const response = await worker.fetch(new Request("https://studio.test/api/agents/gemma-review", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ task: "Создай сайт", plan: "1. Уточнить требования\\n2. Собрать интерфейс" })
+    }), {
+      ...env,
+      GEMMA_MODEL: "@cf/google/gemma-4-26b-a4b-it",
+      AI: {
+        run: async (model, input) => {
+          calledModel = model;
+          calledMessages = input.messages;
+          return { response: "Риски: не определены критерии приёмки.\\nИсправление: добавить тесты." };
+        }
+      }
+    });
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.equal(result.ok, true);
+    assert.equal(result.agent, "Gemma");
+    assert.equal(result.model, "@cf/google/gemma-4-26b-a4b-it");
+    assert.match(result.review, /критерии приёмки/);
+    assert.equal(calledModel, "@cf/google/gemma-4-26b-a4b-it");
+    assert.equal(calledMessages.length, 2);
+  });
+
+  it("does not call Workers AI when the binding is missing", async () => {
+    const cookie = await getSessionCookie();
+    const response = await worker.fetch(new Request("https://studio.test/api/agents/gemma-review", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ task: "Создай сайт", plan: "Сделать сайт" })
+    }), env);
+    assert.equal(response.status, 503);
+    assert.match((await response.json()).error, /Workers AI не подключён/);
+  });
+
   it("returns a rate-limit message when Gemini responds with 429", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () => new Response("{}", { status: 429 });
