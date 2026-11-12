@@ -549,7 +549,7 @@ export default {
       if (!task) return json({ error: "Опишите задачу." }, 400);
       if (!teamSettings.agents.qwen && !teamSettings.agents.north) return json({ error: "Включите Qwen или Cohere North Mini Code — нужен хотя бы один разработчик." }, 400);
       if (teamSettings.agents.gemini && !env.GEMINI_API_KEY) return json({ error: "Gemini включён, но GEMINI_API_KEY не настроен." }, 503);
-      if ((teamSettings.agents.qwen || teamSettings.agents.gemma) && !env.AI) return json({ error: "Для включённых Qwen/Gemma требуется Cloudflare Workers AI." }, 503);
+      if ((teamSettings.agents.qwen || (teamSettings.agents.gemma && teamSettings.intensity >= 50)) && !env.AI) return json({ error: "Для включённых Qwen/Gemma требуется Cloudflare Workers AI." }, 503);
       if (teamSettings.agents.north && !env.OPENROUTER_API_KEY) return json({ error: "Cohere North Mini Code включён, но OPENROUTER_API_KEY ещё не добавлен в секреты Cloudflare." }, 503);
       if (task.length > 6000) return json({ error: "Задача слишком длинная. Максимум — 6000 символов." }, 413);
 
@@ -693,7 +693,7 @@ export default {
         }
 
         const developerSystem =
-          "Ты — Qwen, основной разработчик команды AI Studio. Подготовь реальные изменения файлов существующего репозитория. " +
+          "Ты — основной разработчик команды AI Studio. Подготовь реальные изменения файлов существующего репозитория. " +
           "Верни ТОЛЬКО JSON без Markdown: {\"summary\":\"...\",\"changes\":[{\"path\":\"src/...\",\"content\":\"ПОЛНОЕ СОДЕРЖИМОЕ ФАЙЛА\",\"reason\":\"...\"}]}. " +
           "Каждый content — полное содержимое файла, не diff. Не выдумывай секреты и API-ключи. " +
           "Не меняй workflows, package.json, package-lock, wrangler config, настройки доступа или секреты. " +
