@@ -106,3 +106,11 @@
 .agent-status.is-working span{background:#54c99a;box-shadow:0 0 8px #54c99a88}
 .agent-status.is-error{color:#e49a95}
 .agent-status.is-error span{background:#df7770}
+
+.editor-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.editor-toolbar .delete-file-button{border-color:#674044;background:#301d24;color:#f0b2b2}
+.diff-view{display:grid;grid-template-columns:1fr 1fr;min-height:470px;overflow:auto;background:#0d1118}
+.diff-column{min-width:0;border-right:1px solid #303747}
+.diff-column strong{display:block;padding:9px 12px;border-bottom:1px solid #303747;color:#9fa8b9;font-size:9px}
+.diff-column pre{margin:0;padding:12px;white-space:pre-wrap;overflow-wrap:anywhere;color:#d5dbea;font:10px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace}
+@media(max-width:760px){.editor-toolbar{align-items:flex-start;flex-direction:column}.editor-actions{width:100%;justify-content:flex-start}.diff-view{grid-template-columns:1fr}.diff-column{border-right:0;border-bottom:1px solid #303747}}
