@@ -456,6 +456,26 @@ describe("AI Studio Worker", () => {
   });
 
 
+
+  it("allows Telegram-authenticated sessions to use the chat API without APP_PASSWORD", async () => {
+    const cookie = await getSessionCookie();
+    const response = await worker.fetch(new Request("https://studio.test/api/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+      body: JSON.stringify({
+        message: "Привет",
+        teamSettings: { mode: "chat", intensity: 10, agents: { gemini: false, qwen: true, gemma: false, north: false } }
+      })
+    }), {
+      ...env,
+      APP_PASSWORD: "",
+      TELEGRAM_BOT_TOKEN: "configured-telegram-bot-token",
+      AI: { run: async () => ({ response: "Привет! Я Qwen." }) }
+    });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).agent, "qwen");
+  });
+
   it("keeps lightweight chat separate from the development workflow", async () => {
     const cookie = await getSessionCookie();
     let requestedModel = "";
