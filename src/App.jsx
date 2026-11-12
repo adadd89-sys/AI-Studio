@@ -281,7 +281,7 @@ function App() {
       setTask('');
       setActive('Процессы');
     } catch (error) {
-      if (!lastPlan) setGeminiCallStatus(false);
+      setGeminiCallStatus(false);
       setTaskError(error.message || 'Не удалось связаться с сервером.');
     } finally {
       setIsSubmitting(false);
