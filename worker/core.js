@@ -63,7 +63,7 @@ async function verifyTelegramInitData(initData, botToken) {
     if (mismatch !== 0) return null;
     const authDate = Number(params.get("auth_date"));
     const now = Math.floor(Date.now() / 1000);
-    if (!Number.isInteger(authDate) || authDate > now + 60 || now - authDate > 86400) return null;
+    if (!Number.isInteger(authDate) || authDate > now + 60 || now - authDate > 600) return null;
     const user = JSON.parse(params.get("user") || "null");
     if (!user || !Number.isSafeInteger(user.id)) return null;
     return user;
