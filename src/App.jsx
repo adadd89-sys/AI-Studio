@@ -18,7 +18,7 @@ const navigation = [
 const agents = [
   { name: 'Gemini', role: 'Планировщик и координатор', tone: 'blue', initials: 'Ge', detail: 'Анализирует запрос, формирует план и распределяет работу.' },
   { name: 'Gemma 4', role: 'Аналитик и тестировщик', tone: 'green', initials: 'G', detail: 'Независимо проверяет план, риски и критерии готовности.' },
-  { name: 'Qwen 3.8', role: 'Архитектор и ревьюер', tone: 'violet', initials: 'Q', detail: 'Даёт второе независимое мнение и предлагает улучшения.' }
+  { name: 'Qwen 3.8', role: 'Основной разработчик и исполнитель', tone: 'violet', initials: 'Q', detail: 'Проектирует архитектуру, пишет код и готовит изменения файлов.' }
 ];
 
 
@@ -312,7 +312,7 @@ function App() {
         <div className="sidebar-bottom">
           <button className="nav-item" onClick={() => setActive('Настройки')}><Settings2 size={17} /><span>Настройки</span></button>
           <div className="github-card">
-            <div className="github-top"><GitBranch size={15} /><span>GitHub подключён</span><span className="online-dot" /></div>
+            <div className="github-top"><GitBranch size={15} /><span>GitHub workspace</span><span className="online-dot" /></div>
             <strong>adadd89-sys / AI-Studio</strong>
             <small>Ветка main</small>
           </div>
