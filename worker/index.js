@@ -509,6 +509,7 @@ export default {
         return { data: parsed, model, fallbackUsed };
       }
 
+      let executionStage = "gemini_plan";
       try {
         const planResult = await callGemini(
           "Ты — руководитель команды разработки AI Studio. Проанализируй задачу и составь конкретный исполнимый план для изменения текущего репозитория AI Studio. " +
@@ -520,10 +521,17 @@ export default {
           return json({ error: "Gemini составил план в неожиданном формате." }, 502);
         }
 
+        executionStage = "github_context";
         const mainRef = await githubRequest(env, "/repos/" + GITHUB_REPO + "/git/ref/heads/main");
         const tree = await githubRequest(env, "/repos/" + GITHUB_REPO + "/git/trees/" + mainRef.object.sha + "?recursive=1");
-        const repoFiles = (tree.tree || []).filter(item => item.type === "blob").map(item => item.path).slice(0, 250);
-        const contextPaths = ["src/App.jsx", "src/styles.css", "worker/index.js", "worker/index.test.js"];
+        const repoFiles = (tree.tree || []).filter(item => item.type === "blob").map(item => item.path).slice(0, 120);
+        const backendTask = /worker|api|сервер|backend|бекенд|авторизац|github|cloudflare|endpoint|маршрут/i.test(task);
+        const frontendTask = /интерфейс|компонент|страниц|кнопк|дизайн|стил|верстк|react|jsx|css|frontend|фронтенд|teamstatus/i.test(task);
+        const contextPaths = backendTask
+          ? ["worker/index.js", "worker/index.test.js", "src/App.jsx"]
+          : frontendTask
+            ? ["src/App.jsx", "src/styles.css"]
+            : ["src/App.jsx", "src/styles.css", "worker/index.js"];
         const contextFiles = [];
         for (const path of contextPaths) {
           const item = (tree.tree || []).find(entry => entry.type === "blob" && entry.path === path);
@@ -548,6 +556,7 @@ export default {
           "\n\nДерево файлов:\n" + repoFiles.join("\n");
         const planText = JSON.stringify(plan);
         async function askQwen(feedback) {
+          executionStage = feedback ? "qwen_repair" : "qwen_implementation";
           const result = await env.AI.run(qwenModel, {
             messages: [
               { role: "system", content: developerSystem },
@@ -555,7 +564,7 @@ export default {
                 "\n\n" + contextText + (feedback ? "\n\nЗамечания Gemma:\n" + feedback : "") +
                 "\n\nПодготовь законченные изменения файлов. Ответ только JSON." }
             ],
-            max_completion_tokens: 8192, temperature: 0.15
+            max_completion_tokens: 4096, temperature: 0.15
           });
           const parsed = parseJsonObject(modelText(result));
           if (!parsed || !Array.isArray(parsed.changes)) throw new Error("Qwen вернул ответ не в ожидаемом формате.");
@@ -583,8 +592,9 @@ export default {
         }
 
         async function reviewChanges(changes) {
+          executionStage = "gemma_review";
           const reviewInput = JSON.stringify({ task, plan,
-            changes: changes.map(change => ({ path: change.path, reason: change.reason || "", content: change.content })) });
+            changes: changes.map(change => ({ path: change.path, reason: change.reason || "", content: change.content.slice(0, 24000) })) });
           const result = await env.AI.run(gemmaModel, {
             messages: [
               { role: "system", content: "Ты — Gemma, независимый ревьюер и тестировщик. Критически проверь изменения на соответствие задаче, ошибки, безопасность и поломку архитектуры. " +
@@ -612,6 +622,7 @@ export default {
           plan, review, repairAttempted
         }, 422);
 
+        executionStage = "github_save";
         const branch = "ai-studio/task-" + Date.now().toString(36);
         await githubRequest(env, "/repos/" + GITHUB_REPO + "/git/refs", {
           method: "POST", body: JSON.stringify({ ref: "refs/heads/" + branch, sha: mainRef.object.sha })
@@ -647,7 +658,19 @@ export default {
           gemmaReview: review.summary || (review.issues.length ? review.issues.join("\n") : "Изменения одобрены."),
           reviewIssues: review.issues, repairAttempted });
       } catch (error) {
-        return json({ error: error?.message || "Не удалось выполнить задачу командой ИИ.", upstreamStatus: error?.status || null }, 502);
+        return json({
+          error: error?.message || "Не удалось выполнить задачу командой ИИ.",
+          stage: executionStage,
+          stageLabel: ({
+            gemini_plan: "Планирование Gemini",
+            github_context: "Чтение контекста GitHub",
+            qwen_implementation: "Разработка Qwen",
+            qwen_repair: "Исправление Qwen",
+            gemma_review: "Проверка Gemma",
+            github_save: "Сохранение изменений в GitHub"
+          })[executionStage] || executionStage,
+          upstreamStatus: error?.status || null
+        }, 502);
       }
     }
 
