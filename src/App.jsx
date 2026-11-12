@@ -16,9 +16,9 @@ const navigation = [
 ];
 
 const agents = [
-  { name: 'ChatGPT', role: 'Архитектор и координатор', tone: 'violet', initials: 'G', detail: 'Планирует работу, распределяет задачи и проверяет общий результат.' },
-  { name: 'Gemini', role: 'Разработчик', tone: 'blue', initials: 'Ge', detail: 'Помогает проектировать решения и писать код.' },
-  { name: 'DeepSeek', role: 'Ревьюер и аналитик', tone: 'green', initials: 'D', detail: 'Ищет ошибки, проверяет логику и предлагает альтернативы.' }
+  { name: 'Gemini', role: 'Планировщик и координатор', tone: 'blue', initials: 'Ge', detail: 'Анализирует запрос, формирует план и распределяет работу.' },
+  { name: 'Gemma 4', role: 'Аналитик и тестировщик', tone: 'green', initials: 'G', detail: 'Независимо проверяет план, риски и критерии готовности.' },
+  { name: 'Qwen 3.8', role: 'Архитектор и ревьюер', tone: 'violet', initials: 'Q', detail: 'Даёт второе независимое мнение и предлагает улучшения.' }
 ];
 
 function App() {
@@ -34,9 +34,9 @@ function App() {
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [deepSeekReview, setDeepSeekReview] = useState('');
-  const [chatGptReview, setChatGptReview] = useState('');
-  const [reviewCopyStatus, setReviewCopyStatus] = useState('');
+  const [gemmaReview, setGemmaReview] = useState(null);
+  const [qwenReview, setQwenReview] = useState(null);
+  const [reviewStatus, setReviewStatus] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -68,47 +68,6 @@ function App() {
     finally { setIsLoggingIn(false); }
   }
 
-  function buildReviewPrompt(agent) {
-    if (!lastPlan) return '';
-    return [
-      'Ты — независимый участник команды AI Studio. Проведи критическую проверку плана, не переписывай его без необходимости.',
-      'Задача пользователя: ' + lastPlan.title,
-      'План Gemini: ' + lastPlan.summary,
-      'Шаги: ' + lastPlan.steps.map((step, index) => (index + 1) + '. ' + step).join('\n'),
-      'Риски: ' + (lastPlan.risks || []).join('; '),
-      'Открытые вопросы: ' + (lastPlan.questions || []).join('; '),
-      'Твоя роль: ' + agent,
-      'Ответь по пунктам: 1) что верно; 2) ошибки и пропуски; 3) конкретные улучшения; 4) итоговая оценка плана. Не утверждай, что код или проект уже созданы.'
-    ].join('\n\n');
-  }
-
-  async function copyReviewPrompt(agent) {
-    try {
-      await navigator.clipboard.writeText(buildReviewPrompt(agent));
-      setReviewCopyStatus('Запрос для ' + agent + ' скопирован.');
-    } catch {
-      setReviewCopyStatus('Не удалось скопировать. Проверьте разрешение браузера на буфер обмена.');
-    }
-  }
-
-  async function copyFinalPrompt() {
-    const prompt = [
-      'Ты — координатор AI Studio. Сопоставь план Gemini и независимые отзывы DeepSeek и ChatGPT.',
-      'Задача: ' + (lastPlan?.title || ''),
-      'План Gemini: ' + (lastPlan?.summary || ''),
-      'Шаги: ' + (lastPlan?.steps || []).join('; '),
-      'Отзыв DeepSeek: ' + (deepSeekReview || 'Не предоставлен'),
-      'Отзыв ChatGPT: ' + (chatGptReview || 'Не предоставлен'),
-      'Сформируй единое решение: согласованные выводы, спорные моменты, исправленный план и следующий конкретный шаг. Не выдумывай выполненную работу.'
-    ].join('\n\n');
-    try {
-      await navigator.clipboard.writeText(prompt);
-      setReviewCopyStatus('Итоговый запрос скопирован.');
-    } catch {
-      setReviewCopyStatus('Не удалось скопировать. Проверьте разрешение браузера на буфер обмена.');
-    }
-  }
-
   async function submitTask(event) {
     event.preventDefault();
     const value = task.trim();
@@ -116,9 +75,9 @@ function App() {
     setIsSubmitting(true);
     setTaskError('');
     setLastPlan(null);
-    setDeepSeekReview('');
-    setChatGptReview('');
-    setReviewCopyStatus('');
+    setGemmaReview(null);
+    setQwenReview(null);
+    setReviewStatus('План готов. Запускаем независимую проверку Gemma и Qwen…');
     try {
       const response = await fetch('/api/plan', {
         method: 'POST',
@@ -127,7 +86,30 @@ function App() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Не удалось составить план.');
-      setLastPlan({ title: value, ...data.plan, model: data.model, primaryModel: data.primaryModel || data.model, fallbackUsed: Boolean(data.fallbackUsed) });
+      const normalizedPlan = { title: value, ...data.plan, model: data.model, primaryModel: data.primaryModel || data.model, fallbackUsed: Boolean(data.fallbackUsed) };
+      setLastPlan(normalizedPlan);
+      const reviewPlan = [
+        "Краткое описание: " + normalizedPlan.summary,
+        "Шаги: " + (normalizedPlan.steps || []).map((step, index) => (index + 1) + ". " + step).join("\\n"),
+        "Риски: " + (normalizedPlan.risks || []).join("; "),
+        "Вопросы: " + (normalizedPlan.questions || []).join("; ")
+      ].join("\\n");
+      const reviewPayload = JSON.stringify({ task: value, plan: reviewPlan });
+      const [gemmaResult, qwenResult] = await Promise.allSettled([
+        fetch("/api/agents/gemma-review", { method: "POST", headers: { "content-type": "application/json" }, body: reviewPayload }).then(async response => {
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || "Gemma не смогла проверить план.");
+          return result;
+        }),
+        fetch("/api/agents/qwen-review", { method: "POST", headers: { "content-type": "application/json" }, body: reviewPayload }).then(async response => {
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || "Qwen не смог проверить план.");
+          return result;
+        })
+      ]);
+      setGemmaReview(gemmaResult.status === "fulfilled" ? { ok: true, ...gemmaResult.value } : { ok: false, error: gemmaResult.reason?.message || "Ошибка проверки Gemma." });
+      setQwenReview(qwenResult.status === "fulfilled" ? { ok: true, ...qwenResult.value } : { ok: false, error: qwenResult.reason?.message || "Ошибка проверки Qwen." });
+      setReviewStatus("Независимая проверка завершена.");
       setTasks(current => [{ id: Date.now(), title: value, status: 'План готов', time: 'Только что' }, ...current]);
       setTask('');
       setActive('Процессы');
@@ -200,19 +182,11 @@ function App() {
               {lastPlan.risks?.length > 0 && <div className="plan-notes"><strong>Риски для проверки</strong>{lastPlan.risks.map((risk, index) => <span key={index}>{risk}</span>)}</div>}
               {lastPlan.questions?.length > 0 && <div className="plan-notes"><strong>Нужно уточнить</strong>{lastPlan.questions.map((question, index) => <span key={index}>{question}</span>)}</div>}
               <div className="review-kit">
-                <div className="review-kit-heading"><strong>Независимая проверка команды</strong><span>Бесплатный ручной режим — без платных API</span></div>
-                <p>Передай один и тот же план двум независимым ИИ. Затем вставь их отзывы сюда для общего разбора.</p>
-                <div className="review-actions">
-                  <button type="button" onClick={() => copyReviewPrompt('DeepSeek')}>Скопировать запрос для DeepSeek</button>
-                  <button type="button" onClick={() => copyReviewPrompt('ChatGPT')}>Скопировать запрос для ChatGPT</button>
-                </div>
-                <div className="review-inputs">
-                  <label>Ответ DeepSeek<textarea value={deepSeekReview} onChange={event => setDeepSeekReview(event.target.value)} placeholder="Вставь сюда результат проверки DeepSeek…" rows={3} /></label>
-                  <label>Ответ ChatGPT<textarea value={chatGptReview} onChange={event => setChatGptReview(event.target.value)} placeholder="Вставь сюда независимый разбор ChatGPT…" rows={3} /></label>
-                </div>
-                <div className="review-actions final-review-actions">
-                  <button type="button" onClick={copyFinalPrompt} disabled={!deepSeekReview.trim() && !chatGptReview.trim()}>Скопировать запрос на итоговый разбор</button>
-                  {reviewCopyStatus && <span role="status">{reviewCopyStatus}</span>}
+                <div className="review-kit-heading"><strong>Автоматическая проверка команды</strong><span>Gemma 4 + Qwen 3.8</span></div>
+                <p>{reviewStatus || "Оба агента автоматически получают план Gemini и независимо проверяют его."}</p>
+                <div className="agent-reviews">
+                  <div className="agent-review"><strong>Gemma 4 · Cloudflare Workers AI</strong>{gemmaReview ? (gemmaReview.ok ? <p>{gemmaReview.review}</p> : <p className="review-error">{gemmaReview.error}</p>) : <span>Ожидает проверки…</span>}</div>
+                  <div className="agent-review"><strong>Qwen 3.8 · Groq API</strong>{qwenReview ? (qwenReview.ok ? <p>{qwenReview.review}</p> : <p className="review-error">{qwenReview.error}</p>) : <span>Ожидает проверки…</span>}</div>
                 </div>
               </div>
             </div>}
@@ -222,7 +196,7 @@ function App() {
             <div className="section-heading"><div><div className="eyebrow">ВАШИ СПЕЦИАЛИСТЫ</div><h2>Команда ИИ</h2></div><button className="subtle-button" onClick={() => setActive('Команда ИИ')}>Вся команда <ChevronRight size={15} /></button></div>
             <div className="agent-grid">
               {agents.map(agent => <article className="agent-card" key={agent.name}>
-                <div className="agent-card-top"><div className={'agent-avatar ' + agent.tone}>{agent.initials}</div><span className="agent-status"><span /> {agent.name === 'Gemini' ? (geminiHealth === null ? 'Проверяем API…' : geminiHealth.modelConfigured ? 'API-ключ настроен' : 'Нужен API-ключ') : 'Ожидает интеграции'}</span></div>
+                <div className="agent-card-top"><div className={'agent-avatar ' + agent.tone}>{agent.initials}</div><span className="agent-status"><span /> {agent.name === 'Gemini' ? (geminiHealth === null ? 'Проверяем API…' : geminiHealth.modelConfigured ? 'API-ключ настроен' : 'Нужен API-ключ') : agent.name === 'Qwen 3.8' ? (geminiHealth?.qwenConfigured ? 'API-ключ настроен' : 'Нужен GROQ_API_KEY') : 'Workers AI'}</span></div>
                 <h3>{agent.name}</h3><div className="agent-role">{agent.role}</div><p>{agent.detail}</p>
                 <div className="agent-card-bottom"><span><ShieldCheck size={14} /> Роль назначена</span><ChevronRight size={16} /></div>
               </article>)}
