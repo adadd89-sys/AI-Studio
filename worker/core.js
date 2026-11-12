@@ -178,8 +178,12 @@ function githubError(error) {
   return json({ error: error?.message || "Не удалось выполнить запрос к GitHub." }, status);
 }
 
+function hasAuthProvider(env) {
+  return Boolean(env.SESSION_SECRET && (env.APP_PASSWORD || env.TELEGRAM_BOT_TOKEN));
+}
+
 async function requireGithubSession(request, env) {
-  if (!env.APP_PASSWORD || !env.SESSION_SECRET) return json({ error: "Авторизация AI Studio не настроена." }, 503);
+  if (!hasAuthProvider(env)) return json({ error: "Авторизация AI Studio не настроена." }, 503);
   if (!await isValidSession(request, env.SESSION_SECRET)) return json({ error: "Требуется вход в AI Studio." }, 401);
   if (!env.GITHUB_TOKEN) return json({ error: "GitHub ещё не подключён. Добавьте секрет GITHUB_TOKEN в Cloudflare Worker." }, 503);
   return null;
@@ -252,7 +256,7 @@ export default {
     }
 
     if (url.pathname === "/api/models/check" && request.method === "GET") {
-      if (!env.APP_PASSWORD || !env.SESSION_SECRET) {
+      if (!hasAuthProvider(env)) {
         return json({ error: "Авторизация ещё не настроена." }, 503);
       }
       if (!await isValidSession(request, env.SESSION_SECRET)) {
@@ -297,7 +301,7 @@ export default {
 
 
     if (url.pathname === "/api/agents/qwen-review" && request.method === "POST") {
-      if (!env.APP_PASSWORD || !env.SESSION_SECRET) {
+      if (!hasAuthProvider(env)) {
         return json({ error: "Авторизация ещё не настроена." }, 503);
       }
       if (!await isValidSession(request, env.SESSION_SECRET)) {
@@ -353,7 +357,7 @@ export default {
     }
 
     if (url.pathname === "/api/agents/gemma-review" && request.method === "POST") {
-      if (!env.APP_PASSWORD || !env.SESSION_SECRET) {
+      if (!hasAuthProvider(env)) {
         return json({ error: "Авторизация ещё не настроена." }, 503);
       }
       if (!await isValidSession(request, env.SESSION_SECRET)) {
@@ -498,7 +502,7 @@ export default {
 
 
     if (url.pathname === "/api/chat" && request.method === "POST") {
-      if (!env.APP_PASSWORD || !env.SESSION_SECRET) return json({ error: "Авторизация AI Studio не настроена." }, 503);
+      if (!hasAuthProvider(env)) return json({ error: "Авторизация AI Studio не настроена." }, 503);
       if (!await isValidSession(request, env.SESSION_SECRET)) return json({ error: "Требуется вход в AI Studio." }, 401);
       if (!hasSameOrigin(request)) return json({ error: "Недопустимый источник запроса." }, 403);
       const body = await request.json().catch(() => null);
@@ -570,7 +574,7 @@ export default {
     }
 
     if (url.pathname === "/api/execute" && request.method === "POST") {
-      if (!env.APP_PASSWORD || !env.SESSION_SECRET) return json({ error: "Авторизация ещё не настроена." }, 503);
+      if (!hasAuthProvider(env)) return json({ error: "Авторизация ещё не настроена." }, 503);
       if (!await isValidSession(request, env.SESSION_SECRET)) return json({ error: "Требуется вход в AI Studio." }, 401);
       if (!hasSameOrigin(request)) return json({ error: "Недопустимый источник запроса." }, 403);
       if (!env.GITHUB_TOKEN) return json({ error: "GitHub не подключён. Проверьте GITHUB_TOKEN." }, 503);
@@ -941,7 +945,7 @@ export default {
     }
 
     if (url.pathname === "/api/plan" && request.method === "POST") {
-      if (!env.APP_PASSWORD || !env.SESSION_SECRET) {
+      if (!hasAuthProvider(env)) {
         return json({ error: "Авторизация ещё не настроена. Добавьте APP_PASSWORD и SESSION_SECRET в секреты Worker." }, 503);
       }
       if (!await isValidSession(request, env.SESSION_SECRET)) {
