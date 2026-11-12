@@ -30,17 +30,40 @@ function App() {
   const [taskError, setTaskError] = useState('');
   const [lastPlan, setLastPlan] = useState(null);
   const [geminiHealth, setGeminiHealth] = useState(null);
+  const [authState, setAuthState] = useState('checking');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   useEffect(() => {
     let active = true;
-    fetch('/api/health')
-      .then(response => response.ok ? response.json() : Promise.reject(new Error('Health check failed')))
-      .then(data => { if (active) setGeminiHealth(data); })
-      .catch(() => { if (active) setGeminiHealth({ ok: false, modelConfigured: false }); });
+    Promise.all([
+      fetch('/api/health').then(response => response.ok ? response.json() : Promise.reject(new Error('Health check failed'))),
+      fetch('/api/session').then(response => response.ok ? response.json() : Promise.reject(new Error('Session check failed')))
+    ]).then(([health, session]) => {
+      if (!active) return;
+      setGeminiHealth(health);
+      setAuthState(!session.authConfigured ? 'setup' : session.authenticated ? 'authenticated' : 'login');
+    }).catch(() => { if (active) { setGeminiHealth({ ok: false, modelConfigured: false }); setAuthState('error'); } });
     return () => { active = false; };
   }, []);
 
   const greeting = useMemo(() => new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long' }).format(new Date()), []);
+
+  async function login(event) {
+    event.preventDefault();
+    if (!loginPassword || isLoggingIn) return;
+    setIsLoggingIn(true);
+    setLoginError('');
+    try {
+      const response = await fetch('/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: loginPassword }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Не удалось войти.');
+      setLoginPassword('');
+      setAuthState('authenticated');
+    } catch (error) { setLoginError(error.message || 'Ошибка входа.'); }
+    finally { setIsLoggingIn(false); }
+  }
 
   async function submitTask(event) {
     event.preventDefault();
@@ -69,6 +92,9 @@ function App() {
   }
 
   const title = active === 'Обзор' ? 'Рабочее пространство' : active;
+  if (authState !== 'authenticated') {
+    return <div className="login-screen"><form className="login-card" onSubmit={login}><div className="brand-mark"><BrainCircuit size={22} /></div><div className="eyebrow">ЗАЩИЩЁННЫЙ ДОСТУП</div><h1>AI Studio</h1><p>{authState === 'checking' ? 'Проверяем авторизацию…' : authState === 'setup' ? 'Авторизация ещё не настроена. Добавьте APP_PASSWORD и SESSION_SECRET в секреты Cloudflare Worker.' : authState === 'error' ? 'Не удалось связаться с сервером. Обновите страницу позже.' : 'Введите личный пароль, чтобы открыть рабочее пространство.'}</p>{authState === 'login' && <><input type="password" autoComplete="current-password" value={loginPassword} onChange={event => setLoginPassword(event.target.value)} placeholder="Пароль доступа" /><button className="primary-button" type="submit" disabled={!loginPassword || isLoggingIn}>{isLoggingIn ? 'Входим…' : 'Войти'} <Send size={15} /></button></>}{loginError && <div className="task-error">{loginError}</div>}</form></div>;
+  }
   return (
     <div className="app-shell">
       <aside className="sidebar">
