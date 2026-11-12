@@ -10,6 +10,7 @@
     "run_worker_first": ["/api/*"]
   },
   "vars": {
-    "GEMINI_MODEL": "gemini-4-hydrogen"
+    "GEMINI_MODEL": "gemini-4-hydrogen",
+    "GEMINI_FALLBACK_MODEL": "gemini-3.8-flash"
   }
 }
