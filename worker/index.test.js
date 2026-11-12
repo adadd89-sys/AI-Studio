@@ -585,7 +585,7 @@ describe("AI Studio Worker", () => {
       assert.equal(result.ok, true);
       assert.match(result.branch, /^ai-studio\/task-/);
       assert.deepEqual(result.filesChanged.map(file => file.path), ["src/new-screen.jsx"]);
-      assert.equal(result.gemmaReview, "Изменения корректны.");
+      assert.equal(result.gemmaReview, "Gemma: Изменения корректны.");
       assert.equal(writes.length, 1);
       assert.equal(writes[0].branch, result.branch);
       assert.equal(writes[0].content, btoa("export default function Settings() { return <main>Settings</main>; }"));
