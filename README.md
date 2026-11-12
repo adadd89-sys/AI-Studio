@@ -40,6 +40,15 @@ npm test
 npm run build
 ```
 
+## Access protection
+
+The Worker protects `POST /api/plan` with a signed, HttpOnly session cookie. Before using the app, add these secrets in Cloudflare Workers & Pages → `ai-studio` → Settings → Variables and Secrets:
+
+- `APP_PASSWORD`: choose a long, unique password for the private workspace.
+- `SESSION_SECRET`: generate a random secret of at least 32 bytes (for example, with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`).
+
+Add both as encrypted **Secrets**, not plain text variables. The session expires after 7 days. Never commit either value or send it in chat. The public health endpoint reveals only whether model/auth secrets are configured; it does not expose their values.
+
 ## Gemini setup
 
 Create a Gemini API key in Google AI Studio and keep it in a Worker secret for deployment:
@@ -58,7 +67,7 @@ After authenticating Wrangler with the Cloudflare account:
 npm run deploy
 ```
 
-The Worker serves the built Vite app and handles `/api/*`. Before exposing a public deployment, put the app behind an access-control layer (for example Cloudflare Access) and configure the API secret. Do not deploy a public unauthenticated endpoint with a personal API key.
+The Worker serves the built Vite app and handles `/api/*`. The app has built-in password/session protection for the planning API. Keep `APP_PASSWORD`, `SESSION_SECRET`, and `GEMINI_API_KEY` as encrypted Worker secrets. The public static interface and health endpoint remain reachable; only planning and model usage require a valid session.
 
 ## Planned next
 
