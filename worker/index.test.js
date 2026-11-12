@@ -539,13 +539,13 @@ describe("AI Studio Worker", () => {
     const response = await worker.fetch(new Request("https://studio.test/api/execute", {
       method: "POST",
       headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
-      body: JSON.stringify({ task: "Создай небольшой компонент", teamSettings: {
+      body: JSON.stringify({ task: "", teamSettings: {
         intensity: 20, mode: "normal",
         agents: { gemini: false, qwen: true, gemma: false, north: false }
       } })
-    }), { ...env, GEMINI_API_KEY: undefined, AI: { run: async () => ({ response: "{}" }) } });
-    assert.equal(response.status, 503);
-    assert.match((await response.json()).error, /GitHub не подключён/);
+    }), { ...env, GEMINI_API_KEY: undefined, GITHUB_TOKEN: "test-github-token", AI: { run: async () => ({ response: "{}" }) } });
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).error, /Опишите задачу/);
   });
 
   it("allows North-only execution without the Cloudflare AI binding", async () => {
@@ -553,13 +553,13 @@ describe("AI Studio Worker", () => {
     const response = await worker.fetch(new Request("https://studio.test/api/execute", {
       method: "POST",
       headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
-      body: JSON.stringify({ task: "Создай небольшой компонент", teamSettings: {
+      body: JSON.stringify({ task: "", teamSettings: {
         intensity: 20, mode: "normal",
         agents: { gemini: false, qwen: false, gemma: false, north: true }
       } })
-    }), { ...env, GEMINI_API_KEY: undefined, AI: undefined, OPENROUTER_API_KEY: "test-openrouter-key" });
-    assert.equal(response.status, 503);
-    assert.match((await response.json()).error, /GitHub не подключён/);
+    }), { ...env, GEMINI_API_KEY: undefined, GITHUB_TOKEN: "test-github-token", AI: undefined, OPENROUTER_API_KEY: "test-openrouter-key" });
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).error, /Опишите задачу/);
   });
 
   it("rejects autonomous execution without a session", async () => {
