@@ -100,6 +100,7 @@ function validAiBranch(branch) {
 async function githubRequest(env, path, options = {}) {
   const headers = {
     "accept": "application/vnd.github+json",
+    "user-agent": "AI-Studio/1.0 (+https://github.com/adadd89-sys/AI-Studio)",
     "x-github-api-version": "2022-11-28",
     ...(options.body ? { "content-type": "application/json" } : {}),
     "authorization": "Bearer " + env.GITHUB_TOKEN
