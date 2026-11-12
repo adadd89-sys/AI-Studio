@@ -454,20 +454,21 @@ export default {
       let body;
       try { body = await request.json(); } catch { return json({ error: "Ожидается корректный JSON." }, 400); }
       const task = typeof body?.task === "string" ? body.task.trim() : "";
+      const teamSettings = body?.teamSettings && typeof body.teamSettings === "object" ? body.teamSettings : {};
       const jobId = typeof body?.jobId === "string" ? body.jobId : "";
       const timestamp = Number(body?.timestamp);
       const signature = request.headers.get("x-ai-studio-workflow-signature") || "";
       if (!task || !jobId || !Number.isInteger(timestamp) || Math.abs(Date.now() - timestamp) > 5 * 60 * 1000) {
         return json({ error: "Недопустимый внутренний запрос Workflow." }, 401);
       }
-      if (!await verifyWorkflowSignature(jobId + "." + timestamp + "." + task, signature, env.SESSION_SECRET)) {
+      if (!await verifyWorkflowSignature(jobId + "." + timestamp + "." + JSON.stringify({ task, teamSettings }), signature, env.SESSION_SECRET)) {
         return json({ error: "Подпись внутреннего запроса Workflow недействительна." }, 401);
       }
       const internalRequest = new Request("https://studio.internal/api/execute", {
         method: "POST",
         headers: { "content-type": "application/json", "origin": "https://studio.internal",
           "cookie": SESSION_COOKIE + "=" + await createSession(env.SESSION_SECRET) },
-        body: JSON.stringify({ task })
+        body: JSON.stringify({ task, teamSettings })
       });
       return this.fetch(internalRequest, env);
     }
@@ -483,9 +484,28 @@ export default {
       let body;
       try { body = await request.json(); } catch { return json({ error: "Ожидается корректный JSON." }, 400); }
       const task = typeof body?.task === "string" ? body.task.trim() : "";
+      const rawSettings = body?.teamSettings && typeof body.teamSettings === "object" ? body.teamSettings : {};
+      const teamSettings = {
+        intensity: Math.max(0, Math.min(100, Number.isFinite(Number(rawSettings.intensity)) ? Math.round(Number(rawSettings.intensity) / 5) * 5 : 60)),
+        mode: ["chat", "normal", "max"].includes(rawSettings.mode) ? rawSettings.mode : "normal",
+        agents: {
+          gemini: rawSettings.agents?.gemini !== false,
+          qwen: rawSettings.agents?.qwen !== false,
+          gemma: rawSettings.agents?.gemma !== false,
+          north: rawSettings.agents?.north === true
+        }
+      };
       if (!task) return json({ error: "Опишите задачу." }, 400);
+      if (!teamSettings.agents.qwen && !teamSettings.agents.north) return json({ error: "Включите Qwen или Cohere North Mini Code — нужен хотя бы один разработчик." }, 400);
+      if (teamSettings.agents.gemini && !env.GEMINI_API_KEY) return json({ error: "Gemini включён, но GEMINI_API_KEY не настроен." }, 503);
+      if ((teamSettings.agents.qwen || teamSettings.agents.gemma) && !env.AI) return json({ error: "Для включённых Qwen/Gemma требуется Cloudflare Workers AI." }, 503);
+      if (teamSettings.agents.north && !env.OPENROUTER_API_KEY) return json({ error: "Cohere North Mini Code включён, но OPENROUTER_API_KEY ещё не добавлен в секреты Cloudflare." }, 503);
       if (task.length > 6000) return json({ error: "Задача слишком длинная. Максимум — 6000 символов." }, 413);
 
+      const usage = { requests: 0, neurons: null, agents: [] };
+      const intensity = teamSettings.mode === "max" ? Math.max(80, teamSettings.intensity) : teamSettings.mode === "chat" ? Math.min(20, teamSettings.intensity) : teamSettings.intensity;
+      const deepReview = teamSettings.agents.gemma && intensity >= 50;
+      const allowRepair = intensity >= 80;
       const primaryModel = env.GEMINI_MODEL || "gemini-4-hydrogen";
       const fallbackModel = env.GEMINI_FALLBACK_MODEL || "gemini-3.8-flash";
       const qwenModel = env.QWEN_MODEL || "@cf/qwen/qwen3.8-27b";
@@ -560,11 +580,13 @@ export default {
         return value && Array.isArray(value.changes) ? value : null;
       }
       async function callGemini(prompt) {
+        usage.agents.push("gemini");
         const requestBody = JSON.stringify({
           contents: [{ role: "user", parts: [{ text: prompt }] }],
           generationConfig: { responseMimeType: "application/json", temperature: 0.2 }
         });
         async function call(model) {
+          usage.requests++;
           return fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) +
             ":generateContent?key=" + encodeURIComponent(env.GEMINI_API_KEY), {
               method: "POST", headers: { "content-type": "application/json" }, body: requestBody
@@ -586,11 +608,11 @@ export default {
 
       let executionStage = "gemini_plan";
       try {
-        const planResult = await callGemini(
+        const planResult = teamSettings.agents.gemini ? await callGemini(
           "Ты — руководитель команды разработки AI Studio. Проанализируй задачу и составь конкретный исполнимый план для изменения текущего репозитория AI Studio. " +
           "Верни только JSON: {\"summary\":\"...\",\"steps\":[\"...\"],\"acceptanceCriteria\":[\"...\"],\"risks\":[\"...\"],\"questions\":[]}. " +
           "Если данных достаточно, questions должен быть пустым массивом. Не утверждай, что работа уже выполнена. Задача пользователя: " + task
-        );
+        ) : { data: { summary: "План сформирован без Gemini в экономном режиме", steps: ["Изучить затронутые файлы", "Подготовить изменения", "Проверить результат"], acceptanceCriteria: [], risks: [], questions: [] }, model: "Локальный план", fallbackUsed: false };
         const plan = planResult.data;
         if (typeof plan.summary !== "string" || !Array.isArray(plan.steps) || !plan.steps.length) {
           return json({ error: "Gemini составил план в неожиданном формате." }, 502);
@@ -632,6 +654,8 @@ export default {
         const planText = JSON.stringify(plan);
         async function askQwen(feedback) {
           executionStage = feedback ? "qwen_repair" : "qwen_implementation";
+          usage.requests++;
+          if (!usage.agents.includes("qwen")) usage.agents.push("qwen");
           const result = await env.AI.run(qwenModel, {
             messages: [
               { role: "system", content: developerSystem },
@@ -639,7 +663,7 @@ export default {
                 "\n\n" + contextText + (feedback ? "\n\nЗамечания Gemma:\n" + feedback : "") +
                 "\n\nПодготовь законченные изменения файлов. Ответ только JSON." }
             ],
-            max_completion_tokens: 4096,
+            max_completion_tokens: intensity <= 20 ? 1200 : intensity <= 50 ? 2200 : intensity <= 80 ? 3200 : 4096,
             reasoning_effort: "low",
             chat_template_kwargs: { enable_thinking: false },
             temperature: 0.15
@@ -667,12 +691,33 @@ export default {
           return parsed;
         }
 
-        let implementation = await askQwen("");
+        async function askNorth(feedback = "") {
+          executionStage = feedback ? "north_repair" : "north_implementation";
+          usage.requests++;
+          if (!usage.agents.includes("north")) usage.agents.push("north");
+          const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: { "content-type": "application/json", "authorization": "Bearer " + env.OPENROUTER_API_KEY, "http-referer": "https://ai-studio.sergey-adadd89.workers.dev", "x-title": "AI Studio" },
+            body: JSON.stringify({ model: "cohere/north-mini-code:free", temperature: 0.15, max_tokens: intensity <= 20 ? 1200 : intensity <= 50 ? 2200 : 4096,
+              messages: [{ role: "system", content: developerSystem }, { role: "user", content: "Задача пользователя:\n" + task + "\n\nПлан Gemini:\n" + planText + "\n\n" + contextText + (feedback ? "\n\nЗамечания ревью:\n" + feedback : "") + "\n\nПодготовь законченные изменения файлов. Ответ только JSON." }] })
+          });
+          if (!response.ok) { const err = await response.text(); throw new Error("OpenRouter North Mini Code: HTTP " + response.status + " — " + err.slice(0, 300)); }
+          const payload = await response.json();
+          const parsed = normalizeQwenPayload(parseJsonObject(modelText(payload)));
+          if (!parsed) throw new Error("Cohere North Mini Code вернула ответ не в формате JSON с массивом changes.");
+          if (parsed.changes.length > 6) throw new Error("North предложила изменить больше 6 файлов.");
+          for (const change of parsed.changes) {
+            if (!change || typeof change.path !== "string" || typeof change.content !== "string" || !validRepoPath(change.path) || !(change.path === "index.html" || change.path.startsWith("src/") || change.path.startsWith("public/") || change.path.startsWith("worker/")) || change.path.split("/").some(part => part.startsWith(".")) || change.path.includes("node_modules") || change.path.includes("dist/") || change.content.length > 250000) throw new Error("North вернула недопустимое изменение файла.");
+          }
+          return parsed;
+        }
+        let implementation = teamSettings.agents.qwen ? await askQwen("") : await askNorth("");
         if (!implementation.changes.length) {
           return json({ ok: true, task, plan, summary: implementation.summary || plan.summary,
             model: planResult.model, primaryModel, fallbackUsed: planResult.fallbackUsed,
-            qwenModel, gemmaModel, branch: null, filesChanged: [],
-            qwenReview: "Qwen не предложил изменений файлов.",
+            qwenModel, gemmaModel, branch: null, filesChanged: [], agentsUsed: usage.agents,
+            usage: { requests: usage.requests, neurons: null },
+            qwenReview: "Разработчик не предложил изменений файлов.",
             gemmaReview: "Проверка кода не запускалась, так как изменений нет." });
         }
 
@@ -680,6 +725,8 @@ export default {
           executionStage = "gemma_review";
           const reviewInput = JSON.stringify({ task, plan,
             changes: changes.map(change => ({ path: change.path, reason: change.reason || "", content: change.content.slice(0, 24000) })) });
+          usage.requests++;
+          if (!usage.agents.includes("gemma")) usage.agents.push("gemma");
           const result = await env.AI.run(gemmaModel, {
             messages: [
               { role: "system", content: "Ты — Gemma, независимый ревьюер и тестировщик. Критически проверь изменения на соответствие задаче, ошибки, безопасность и поломку архитектуры. " +
@@ -694,16 +741,16 @@ export default {
           return parsed;
         }
 
-        let review = await reviewChanges(implementation.changes);
+        let review = deepReview ? await reviewChanges(implementation.changes) : { approved: true, summary: "Ревью пропущено согласно выбранной интенсивности.", issues: [] };
         let repairAttempted = false;
-        if (!review.approved) {
+        if (!review.approved && allowRepair) {
           repairAttempted = true;
-          implementation = await askQwen(JSON.stringify(review));
-          if (!implementation.changes.length) return json({ error: "Gemma отклонила изменения, а Qwen не предложил исправления.", review }, 422);
+          implementation = teamSettings.agents.qwen ? await askQwen(JSON.stringify(review)) : await askNorth(JSON.stringify(review));
+          if (!implementation.changes.length) return json({ error: "Ревью отклонило изменения, а разработчик не предложил исправлений.", review }, 422);
           review = await reviewChanges(implementation.changes);
         }
         if (!review.approved) return json({
-          error: "Gemma не одобрила изменения после исправления. В GitHub ничего не записано.",
+          error: "Gemma не одобрила изменения. В GitHub ничего не записано.",
           plan, review, repairAttempted
         }, 422);
 
@@ -738,9 +785,10 @@ export default {
 
         return json({ ok: true, task, plan, summary: implementation.summary || plan.summary,
           model: planResult.model, primaryModel, fallbackUsed: planResult.fallbackUsed,
-          qwenModel, gemmaModel, branch, filesChanged: changed,
-          qwenReview: "Изменения подготовлены Qwen.",
-          gemmaReview: review.summary || (review.issues.length ? review.issues.join("\n") : "Изменения одобрены."),
+          qwenModel, gemmaModel, branch, filesChanged: changed, agentsUsed: usage.agents,
+          usage: { requests: usage.requests, neurons: null },
+          qwenReview: teamSettings.agents.qwen ? "Изменения подготовлены Qwen." : "Изменения подготовлены Cohere North Mini Code.",
+          gemmaReview: deepReview ? (review.summary || (review.issues.length ? review.issues.join("\n") : "Изменения одобрены.")) : "Ревью пропущено согласно интенсивности.",
           reviewIssues: review.issues, repairAttempted });
       } catch (error) {
         return json({
