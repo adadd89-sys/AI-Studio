@@ -503,7 +503,8 @@ function App() {
                 <p>{reviewStatus || "Оба агента автоматически получают план Gemini и независимо проверяют его."}</p>
                 <div className="agent-reviews">
                   <div className="agent-review"><strong>Gemma 4 · Cloudflare Workers AI</strong>{gemmaReview ? (gemmaReview.ok ? <p>{gemmaReview.review}</p> : <p className="review-error">{gemmaReview.error}</p>) : <span>Ожидает проверки…</span>}</div>
-                  <div className="agent-review"><strong>Qwen 3.8 · Cloudflare Workers AI</strong>{qwenReview ? (qwenReview.ok ? <p>{qwenReview.review}</p> : <p className="review-error">{qwenReview.error}</p>) : <span>Ожидает проверки…</span>}</div>
+                  <div className="agent-review"><strong>{teamSettings.agents.qwen ? "Qwen 3.8 · Cloudflare Workers AI" : "Cohere North Mini Code · OpenRouter"}</strong>{qwenReview ? (qwenReview.ok ? <p>{qwenReview.review}</p> : <p className="review-error">{qwenReview.error}</p>) : <span>Ожидает проверки…</span>}</div>
+                  {executionResult?.northReview && <div className="agent-review"><strong>North Mini Code · независимое ревью</strong><p>{executionResult.northReview.summary || (executionResult.northReview.approved ? "Одобрено" : "Есть замечания")}</p></div>}
                 </div>
               </div>
             </div>}
