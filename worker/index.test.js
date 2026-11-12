@@ -35,6 +35,7 @@ describe("AI Studio Worker", () => {
       modelConfigured: false,
       qwenConfigured: false,
       openrouterConfigured: false,
+      telegramAuthConfigured: false,
       githubConfigured: false,
       authConfigured: false
     });
@@ -42,6 +43,43 @@ describe("AI Studio Worker", () => {
 
   it("rejects planning requests without a session", async () => {
     const response = await worker.fetch(planRequest("", { task: "Создай сайт" }), env);
+    assert.equal(response.status, 401);
+  });
+
+
+  it("authenticates a Telegram Mini App user with a valid signed initData payload", async () => {
+    const botToken = "123456:telegram-test-token";
+    const entries = [
+      ["auth_date", String(Math.floor(Date.now() / 1000))],
+      ["query_id", "AAE-test-query"],
+      ["user", JSON.stringify({ id: 987654321, first_name: "Test" })]
+    ];
+    const checkString = [...entries].sort(([left],[right]) => left.localeCompare(right)).map(([key,value]) => key + "=" + value).join("\n");
+    const webAppKey = await crypto.subtle.importKey("raw", new TextEncoder().encode("WebAppData"), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const secret = await crypto.subtle.sign("HMAC", webAppKey, new TextEncoder().encode(botToken));
+    const validationKey = await crypto.subtle.importKey("raw", secret, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const digest = new Uint8Array(await crypto.subtle.sign("HMAC", validationKey, new TextEncoder().encode(checkString)));
+    const hash = [...digest].map(byte => byte.toString(16).padStart(2, "0")).join("");
+    const initData = new URLSearchParams([...entries, ["hash", hash]]).toString();
+    const response = await worker.fetch(new Request("https://studio.test/api/telegram-login", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://studio.test" },
+      body: JSON.stringify({ initData })
+    }), { SESSION_SECRET: env.SESSION_SECRET, TELEGRAM_BOT_TOKEN: botToken });
+    assert.equal(response.status, 200);
+    const cookie = response.headers.get("set-cookie").split(";")[0];
+    const session = await worker.fetch(new Request("https://studio.test/api/session", { headers: { cookie } }), {
+      SESSION_SECRET: env.SESSION_SECRET, TELEGRAM_BOT_TOKEN: botToken
+    });
+    assert.equal((await session.json()).authenticated, true);
+  });
+
+  it("rejects tampered Telegram Mini App initData", async () => {
+    const response = await worker.fetch(new Request("https://studio.test/api/telegram-login", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://studio.test" },
+      body: JSON.stringify({ initData: "auth_date=1&user=%7B%22id%22%3A1%7D&hash=" + "0".repeat(64) })
+    }), { SESSION_SECRET: env.SESSION_SECRET, TELEGRAM_BOT_TOKEN: "test-token" });
     assert.equal(response.status, 401);
   });
 
