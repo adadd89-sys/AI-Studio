@@ -90,7 +90,7 @@ export default {
         ok: true,
         service: "ai-studio-api",
         modelConfigured: Boolean(env.GEMINI_API_KEY),
-        qwenConfigured: Boolean(env.GROQ_API_KEY),
+        qwenConfigured: Boolean(env.AI),
         authConfigured: Boolean(env.APP_PASSWORD && env.SESSION_SECRET)
       });
     }
@@ -181,8 +181,8 @@ export default {
       if (!await isValidSession(request, env.SESSION_SECRET)) {
         return json({ error: "Требуется вход в AI Studio." }, 401);
       }
-      if (!env.GROQ_API_KEY) {
-        return json({ error: "Qwen API не подключён. Добавьте GROQ_API_KEY в секреты Cloudflare Worker." }, 503);
+      if (!env.AI) {
+        return json({ error: "Qwen не подключён. Проверьте AI binding в Cloudflare Worker." }, 503);
       }
 
       let body;
@@ -199,44 +199,34 @@ export default {
         return json({ error: "Объём задачи или плана превышает допустимый лимит." }, 413);
       }
 
-      const model = env.QWEN_MODEL || "qwen/qwen3.8-27b";
+      const model = env.QWEN_MODEL || "@cf/qwen/qwen3.8-27b";
       try {
-        const upstream = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "authorization": "Bearer " + env.GROQ_API_KEY,
-            "content-type": "application/json"
-          },
-          body: JSON.stringify({
-            model,
-            messages: [
-              {
-                role: "system",
-                content: "Ты — независимый ИИ-архитектор и ревьюер команды AI Studio. Критически проверь план: найди пропуски, технические риски, зависимости и слабые места. Не соглашайся автоматически. Предложи конкретные улучшения и оцени готовность плана к исполнению. Отвечай по-русски, структурированно и кратко. Не утверждай, что работа уже выполнена."
-              },
-              {
-                role: "user",
-                content: "Исходная задача пользователя:\\n" + task + "\\n\\nПлан Gemini:\\n" + plan
-              }
-            ],
-            max_completion_tokens: 1200,
-            temperature: 0.2
-          })
+        const result = await env.AI.run(model, {
+          messages: [
+            {
+              role: "system",
+              content: "Ты — независимый ИИ-архитектор и ревьюер команды AI Studio. Критически проверь план: найди пропуски, технические риски, зависимости и слабые места. Не соглашайся автоматически. Предложи конкретные улучшения и оцени готовность плана к исполнению. Отвечай по-русски, структурированно и кратко. Не утверждай, что работа уже выполнена."
+            },
+            {
+              role: "user",
+              content: "Исходная задача пользователя:\\n" + task + "\\n\\nПлан Gemini:\\n" + plan
+            }
+          ],
+          max_completion_tokens: 1200,
+          temperature: 0.2
         });
-        if (!upstream.ok) {
-          if (upstream.status === 429) {
-            return json({ error: "Бесплатный лимит Qwen через Groq временно исчерпан. Попробуйте позже.", upstreamStatus: 429 }, 429);
-          }
-          return json({ error: "Groq/Qwen вернул ошибку. Проверьте доступность модели и API-ключ.", upstreamStatus: upstream.status }, 502);
-        }
-        const payload = await upstream.json();
-        const review = typeof payload?.choices?.[0]?.message?.content === "string"
-          ? payload.choices[0].message.content.trim()
-          : "";
+        const review = typeof result?.response === "string"
+          ? result.response.trim()
+          : typeof result?.choices?.[0]?.message?.content === "string"
+            ? result.choices[0].message.content.trim()
+            : "";
         if (!review) throw new Error("Empty model response");
         return json({ ok: true, agent: "Qwen", model, review });
-      } catch {
-        return json({ error: "Не удалось связаться с Qwen через Groq. Проверьте соединение и доступность API." }, 502);
+      } catch (error) {
+        return json({
+          error: "Qwen через Cloudflare Workers AI не смог выполнить проверку. Проверьте доступность модели и бесплатный лимит Workers AI.",
+          detail: error?.message || null
+        }, 502);
       }
     }
 
