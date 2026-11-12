@@ -128,6 +128,50 @@ export default {
       });
     }
 
+    if (url.pathname === "/api/models/check" && request.method === "GET") {
+      if (!env.APP_PASSWORD || !env.SESSION_SECRET) {
+        return json({ error: "Авторизация ещё не настроена." }, 503);
+      }
+      if (!await isValidSession(request, env.SESSION_SECRET)) {
+        return json({ error: "Требуется вход в AI Studio." }, 401);
+      }
+      if (!env.GEMINI_API_KEY) {
+        return json({ error: "Gemini API-ключ не настроен." }, 503);
+      }
+
+      const targetModel = "gemini-4-hydrogen";
+      let upstream;
+      try {
+        upstream = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000", {
+          headers: { "x-goog-api-key": env.GEMINI_API_KEY }
+        });
+      } catch {
+        return json({ error: "Не удалось получить список моделей Gemini." }, 502);
+      }
+      if (!upstream.ok) {
+        return json({ error: "Gemini API отклонил запрос списка моделей.", upstreamStatus: upstream.status }, 502);
+      }
+
+      try {
+        const payload = await upstream.json();
+        const model = (payload.models || []).find(item =>
+          item.name === "models/" + targetModel || item.name === targetModel
+        );
+        return json({
+          ok: true,
+          model: targetModel,
+          found: Boolean(model),
+          supportsGenerateContent: Boolean(model?.supportedGenerationMethods?.includes("generateContent")),
+          displayName: model?.displayName || null,
+          inputTokenLimit: model?.inputTokenLimit || null,
+          outputTokenLimit: model?.outputTokenLimit || null,
+          billingNote: "Проверка списка моделей не выполняет генерацию и не подтверждает бесплатный тариф."
+        });
+      } catch {
+        return json({ error: "Gemini вернул некорректный список моделей." }, 502);
+      }
+    }
+
     if (url.pathname === "/api/plan" && request.method === "POST") {
       if (!env.APP_PASSWORD || !env.SESSION_SECRET) {
         return json({ error: "Авторизация ещё не настроена. Добавьте APP_PASSWORD и SESSION_SECRET в секреты Worker." }, 503);
