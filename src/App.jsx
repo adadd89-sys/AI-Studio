@@ -186,7 +186,7 @@ function App() {
                 <p>{reviewStatus || "Оба агента автоматически получают план Gemini и независимо проверяют его."}</p>
                 <div className="agent-reviews">
                   <div className="agent-review"><strong>Gemma 4 · Cloudflare Workers AI</strong>{gemmaReview ? (gemmaReview.ok ? <p>{gemmaReview.review}</p> : <p className="review-error">{gemmaReview.error}</p>) : <span>Ожидает проверки…</span>}</div>
-                  <div className="agent-review"><strong>Qwen 3.8 · Groq API</strong>{qwenReview ? (qwenReview.ok ? <p>{qwenReview.review}</p> : <p className="review-error">{qwenReview.error}</p>) : <span>Ожидает проверки…</span>}</div>
+                  <div className="agent-review"><strong>Qwen 3.8 · Cloudflare Workers AI</strong>{qwenReview ? (qwenReview.ok ? <p>{qwenReview.review}</p> : <p className="review-error">{qwenReview.error}</p>) : <span>Ожидает проверки…</span>}</div>
                 </div>
               </div>
             </div>}
@@ -196,7 +196,7 @@ function App() {
             <div className="section-heading"><div><div className="eyebrow">ВАШИ СПЕЦИАЛИСТЫ</div><h2>Команда ИИ</h2></div><button className="subtle-button" onClick={() => setActive('Команда ИИ')}>Вся команда <ChevronRight size={15} /></button></div>
             <div className="agent-grid">
               {agents.map(agent => <article className="agent-card" key={agent.name}>
-                <div className="agent-card-top"><div className={'agent-avatar ' + agent.tone}>{agent.initials}</div><span className="agent-status"><span /> {agent.name === 'Gemini' ? (geminiHealth === null ? 'Проверяем API…' : geminiHealth.modelConfigured ? 'API-ключ настроен' : 'Нужен API-ключ') : agent.name === 'Qwen 3.8' ? (geminiHealth?.qwenConfigured ? 'API-ключ настроен' : 'Нужен GROQ_API_KEY') : 'Workers AI'}</span></div>
+                <div className="agent-card-top"><div className={'agent-avatar ' + agent.tone}>{agent.initials}</div><span className="agent-status"><span /> {agent.name === 'Gemini' ? (geminiHealth === null ? 'Проверяем API…' : geminiHealth.modelConfigured ? 'API-ключ настроен' : 'Нужен API-ключ') : agent.name === 'Qwen 3.8' ? (geminiHealth?.qwenConfigured ? 'Workers AI подключён' : 'Нет AI binding') : 'Workers AI'}</span></div>
                 <h3>{agent.name}</h3><div className="agent-role">{agent.role}</div><p>{agent.detail}</p>
                 <div className="agent-card-bottom"><span><ShieldCheck size={14} /> Роль назначена</span><ChevronRight size={16} /></div>
               </article>)}
