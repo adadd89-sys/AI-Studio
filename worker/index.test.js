@@ -234,45 +234,40 @@ describe("AI Studio Worker", () => {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ task: "Создай сайт", plan: "Сделать сайт" })
-    }), { ...env, GROQ_API_KEY: "test-groq-key" });
+    }), { ...env, AI: { run: async () => ({ response: "ok" }) } });
     assert.equal(response.status, 401);
   });
 
-  it("returns a structured Qwen review through Groq", async () => {
-    const originalFetch = globalThis.fetch;
-    let requestedUrl = "";
-    let requestBody;
-    let authorization = "";
-    globalThis.fetch = async (url, options) => {
-      requestedUrl = String(url);
-      authorization = options.headers.authorization;
-      requestBody = JSON.parse(options.body);
-      return new Response(JSON.stringify({
-        choices: [{ message: { content: "Недостаточно критериев приёмки. Добавить тесты и проверку сборки." } }]
-      }), { status: 200, headers: { "content-type": "application/json" } });
-    };
-    try {
-      const cookie = await getSessionCookie();
-      const response = await worker.fetch(new Request("https://studio.test/api/agents/qwen-review", {
-        method: "POST",
-        headers: { "content-type": "application/json", cookie },
-        body: JSON.stringify({ task: "Создай сайт", plan: "1. Уточнить требования\\n2. Собрать интерфейс" })
-      }), { ...env, GROQ_API_KEY: "test-groq-key" });
-      assert.equal(response.status, 200);
-      const result = await response.json();
-      assert.equal(result.ok, true);
-      assert.equal(result.agent, "Qwen");
-      assert.equal(result.model, "qwen/qwen3.8-27b");
-      assert.match(result.review, /критериев приёмки/);
-      assert.equal(requestedUrl, "https://api.groq.com/openai/v1/chat/completions");
-      assert.equal(authorization, "Bearer test-groq-key");
-      assert.equal(requestBody.model, "qwen/qwen3.8-27b");
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+  it("returns a structured Qwen review through Cloudflare Workers AI", async () => {
+    const cookie = await getSessionCookie();
+    let calledModel = "";
+    let calledMessages = [];
+    const response = await worker.fetch(new Request("https://studio.test/api/agents/qwen-review", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ task: "Создай сайт", plan: "1. Уточнить требования\\n2. Собрать интерфейс" })
+    }), {
+      ...env,
+      QWEN_MODEL: "@cf/qwen/qwen3.8-27b",
+      AI: {
+        run: async (model, input) => {
+          calledModel = model;
+          calledMessages = input.messages;
+          return { response: "Недостаточно критериев приёмки. Добавить тесты и проверку сборки." };
+        }
+      }
+    });
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.equal(result.ok, true);
+    assert.equal(result.agent, "Qwen");
+    assert.equal(result.model, "@cf/qwen/qwen3.8-27b");
+    assert.match(result.review, /критериев приёмки/);
+    assert.equal(calledModel, "@cf/qwen/qwen3.8-27b");
+    assert.equal(calledMessages.length, 2);
   });
 
-  it("does not call Groq when the Qwen API key is missing", async () => {
+  it("does not call Workers AI for Qwen when the AI binding is missing", async () => {
     const cookie = await getSessionCookie();
     const response = await worker.fetch(new Request("https://studio.test/api/agents/qwen-review", {
       method: "POST",
@@ -280,7 +275,7 @@ describe("AI Studio Worker", () => {
       body: JSON.stringify({ task: "Создай сайт", plan: "Сделать сайт" })
     }), env);
     assert.equal(response.status, 503);
-    assert.match((await response.json()).error, /GROQ_API_KEY/);
+    assert.match((await response.json()).error, /Qwen не подключён/);
   });
 
   it("returns a rate-limit message when Gemini responds with 429", async () => {
