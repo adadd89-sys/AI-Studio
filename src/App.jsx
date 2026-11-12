@@ -284,8 +284,36 @@ function App() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ task: value })
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Команда ИИ не смогла выполнить задачу.');
+      const started = await response.json();
+      if (!response.ok) throw new Error(started.error || 'Не удалось запустить задачу.');
+      if (!started.jobId) throw new Error('Сервер не вернул идентификатор задачи.');
+
+      let data = null;
+      let completed = false;
+      for (let attempt = 0; attempt < 300; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        const statusResponse = await fetch('/api/execute/' + encodeURIComponent(started.jobId));
+        const statusData = await statusResponse.json().catch(() => ({}));
+        if (!statusResponse.ok) throw new Error(statusData.error || 'Не удалось получить статус задачи.');
+        if (statusData.status === 'complete') {
+          data = statusData.output?.data || null;
+          if (!data) throw new Error('Workflow завершился без результата выполнения.');
+          if (statusData.output?.httpStatus >= 400 || data.error) {
+            throw new Error(data.error || 'Команда ИИ не смогла выполнить задачу.');
+          }
+          completed = true;
+          break;
+        }
+        if (statusData.status === 'errored' || statusData.status === 'terminated') {
+          throw new Error(statusData.error?.message || 'Асинхронная задача завершилась с ошибкой.');
+        }
+        setReviewStatus(statusData.status === 'queued'
+          ? 'Задача в очереди Cloudflare Workflows…'
+          : 'Gemini, Qwen и Gemma выполняют задачу. Это может занять несколько минут…');
+      }
+      if (!completed) {
+        throw new Error('Задача всё ещё выполняется в фоне. Идентификатор: ' + started.jobId + '. Обновите страницу позже и проверьте статус.');
+      }
       setGeminiCallStatus(true);
       const plan = data.plan || { summary: data.summary || 'Задача проанализирована', steps: [], risks: [], questions: [] };
       setLastPlan({
