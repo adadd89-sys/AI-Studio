@@ -351,7 +351,7 @@ export default {
           if (ref !== "main" && !validAiBranch(ref)) return json({ error: "Недопустимая ветка." }, 400);
           const file = await githubRequest(env, "/repos/" + GITHUB_REPO + "/contents/" + path.split("/").map(encodeURIComponent).join("/") + "?ref=" + encodeURIComponent(ref));
           if (file.type !== "file" || typeof file.content !== "string") return json({ error: "Поддерживаются только текстовые файлы." }, 415);
-          const content = atob(file.content.replace(/\\s/g, ""));
+          const content = atob(file.content.replace(/\s/g, ""));
           const bytes = Uint8Array.from(content, char => char.charCodeAt(0));
           return json({ ok: true, path, ref, sha: file.sha, content: new TextDecoder("utf-8", { fatal: false }).decode(bytes), size: file.size });
         }
