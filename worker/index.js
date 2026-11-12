@@ -87,7 +87,7 @@ const GITHUB_API = "https://api.github.com";
 
 function validRepoPath(path) {
   return typeof path === "string" && path.length > 0 && path.length <= 500 &&
-    !path.startsWith("/") && !path.includes("\\\\") &&
+    !path.startsWith("/") && !path.includes("\\") &&
     path.split("/").every(part => part && part !== "." && part !== "..");
 }
 
