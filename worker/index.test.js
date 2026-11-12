@@ -485,7 +485,7 @@ describe("AI Studio Worker", () => {
         if (model === "@cf/qwen/qwen3.8-27b") {
           return { response: JSON.stringify({
             summary: "Подготовлен экран настроек",
-            changes: [{ path: "src/new-screen.jsx", content: "export default function Settings() { return <main>Настройки</main>; }", reason: "Добавить экран настроек" }]
+            changes: [{ path: "src/new-screen.jsx", content: "export default function Settings() { return <main>Settings</main>; }", reason: "Добавить экран настроек" }]
           }) };
         }
         if (model === "@cf/google/gemma-4-26b-a4b-it") {
@@ -508,7 +508,7 @@ describe("AI Studio Worker", () => {
       assert.equal(result.gemmaReview, "Изменения корректны.");
       assert.equal(writes.length, 1);
       assert.equal(writes[0].branch, result.branch);
-      assert.equal(writes[0].content, btoa("export default function Settings() { return <main>Настройки</main>; }"));
+      assert.equal(writes[0].content, btoa("export default function Settings() { return <main>Settings</main>; }"));
     } finally {
       globalThis.fetch = originalFetch;
     }
