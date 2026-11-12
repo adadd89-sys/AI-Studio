@@ -18,3 +18,12 @@
 .plan-header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.plan-header h3{font:650 13px Manrope;color:#e8e6f2;margin:6px 0 0}.plan-model{font-size:8px;color:#a99bf0;border:1px solid #39334f;border-radius:20px;padding:5px 8px;white-space:nowrap}
 .generated-plan ol{margin:13px 0 0;padding-left:20px;display:grid;gap:8px}.generated-plan li{font-size:10px;line-height:1.5;color:#c4c7d2;padding-left:3px}.generated-plan li::marker{color:#a99bf0}
 .plan-notes{display:grid;gap:5px;margin-top:12px;padding-top:10px;border-top:1px solid #292b38}.plan-notes strong{font-size:9px;color:#c9bfff}.plan-notes span{font-size:9px;color:#8c92a0;line-height:1.5}
+
+.login-screen{min-height:100vh;display:grid;place-items:center;padding:24px;background:radial-gradient(ellipse at 50% 0%,rgba(85,75,160,.2),transparent 48%),#0b0d12}
+.login-card{width:min(100%,390px);display:grid;gap:14px;padding:30px;border:1px solid #343047;border-radius:16px;background:linear-gradient(145deg,#171923,#11131b);box-shadow:0 24px 80px #0005}
+.login-card .brand-mark{width:44px;height:44px;margin-bottom:4px}
+.login-card h1{font:750 25px Manrope;margin:0;color:#f0f0f5}
+.login-card p{font-size:11px;line-height:1.65;color:#9298a8;margin:0 0 4px}
+.login-card input{width:100%;border:1px solid #343443;background:#10121a;color:#e9eaf0;border-radius:9px;padding:12px 13px;outline:none;font:inherit;font-size:12px}
+.login-card input:focus{border-color:#7565c3;box-shadow:0 0 0 3px #7968c31c}
+.login-card .primary-button{justify-content:center;padding:12px}
