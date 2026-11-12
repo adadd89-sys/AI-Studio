@@ -136,6 +136,7 @@ export default {
         service: "ai-studio-api",
         modelConfigured: Boolean(env.GEMINI_API_KEY),
         qwenConfigured: Boolean(env.AI),
+        githubConfigured: Boolean(env.GITHUB_TOKEN),
         authConfigured: Boolean(env.APP_PASSWORD && env.SESSION_SECRET)
       });
     }
@@ -338,7 +339,7 @@ export default {
           const ref = url.searchParams.get("ref") || "main";
           if (ref !== "main" && !validAiBranch(ref)) return json({ error: "Недопустимая ветка." }, 400);
           const repo = await githubRequest(env, "/repos/" + GITHUB_REPO);
-          const branch = await githubRequest(env, "/repos/" + GITHUB_REPO + "/git/ref/heads/" + encodeURIComponent(ref));
+          const branch = await githubRequest(env, "/repos/" + GITHUB_REPO + "/git/ref/heads/" + encodeURIComponent(ref).replace(/%2F/gi, "/"));
           const tree = await githubRequest(env, "/repos/" + GITHUB_REPO + "/git/trees/" + branch.object.sha + "?recursive=1");
           return json({ ok: true, repository: GITHUB_REPO, branch: ref, files: (tree.tree || []).filter(item => item.type === "blob").map(item => ({ path: item.path, size: item.size || 0 })).slice(0, 500), truncated: Boolean(tree.truncated), defaultBranch: repo.default_branch });
         }
