@@ -414,4 +414,104 @@ describe("AI Studio Worker", () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it("rejects autonomous execution without a session", async () => {
+    const response = await worker.fetch(new Request("https://studio.test/api/execute", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://studio.test" },
+      body: JSON.stringify({ task: "Добавь экран настроек" })
+    }), { ...env, AI: { run: async () => ({ response: "{}" }) }, GITHUB_TOKEN: "test-token" });
+    assert.equal(response.status, 401);
+  });
+
+  it("rejects autonomous execution from a different origin", async () => {
+    const cookie = await getSessionCookie();
+    const response = await worker.fetch(new Request("https://studio.test/api/execute", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie, origin: "https://attacker.test" },
+      body: JSON.stringify({ task: "Добавь экран настроек" })
+    }), { ...env, AI: { run: async () => ({ response: "{}" }) }, GITHUB_TOKEN: "test-token" });
+    assert.equal(response.status, 403);
+  });
+
+  it("requires Workers AI for autonomous execution", async () => {
+    const cookie = await getSessionCookie();
+    const response = await worker.fetch(new Request("https://studio.test/api/execute", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+      body: JSON.stringify({ task: "Добавь экран настроек" })
+    }), { ...env, AI: null, GITHUB_TOKEN: "test-token" });
+    assert.equal(response.status, 503);
+    assert.match((await response.json()).error, /Workers AI/);
+  });
+
+  it("coordinates Gemini, Qwen and Gemma and writes approved files to a separate branch", async () => {
+    const originalFetch = globalThis.fetch;
+    const cookie = await getSessionCookie();
+    const writes = [];
+    globalThis.fetch = async (url, options = {}) => {
+      const target = String(url);
+      if (target.includes("generativelanguage.googleapis.com")) {
+        return new Response(JSON.stringify({
+          candidates: [{ content: { parts: [{ text: JSON.stringify({
+            summary: "Добавить экран настроек",
+            steps: ["Создать компонент настроек", "Проверить изменения"],
+            acceptanceCriteria: ["Экран доступен из навигации"],
+            risks: [],
+            questions: []
+          }) }] } }]
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (target.includes("/git/trees/main?recursive=1")) {
+        return new Response(JSON.stringify({ tree: [{ path: "src/App.jsx", type: "blob" }] }), { status: 200 });
+      }
+      if (target.includes("/contents/src/App.jsx?ref=main")) {
+        return new Response(JSON.stringify({ content: btoa("export default function App() { return null; }"), sha: "a".repeat(40) }), { status: 200 });
+      }
+      if (target.includes("/git/ref/heads/main")) {
+        return new Response(JSON.stringify({ object: { sha: "b".repeat(40) } }), { status: 200 });
+      }
+      if (target.endsWith("/git/refs") && options.method === "POST") {
+        return new Response(JSON.stringify({ ref: "refs/heads/ai-studio/task-test" }), { status: 201 });
+      }
+      if (target.endsWith("/contents/src/new-screen.jsx") && options.method === "PUT") {
+        writes.push(JSON.parse(options.body));
+        return new Response(JSON.stringify({ commit: { sha: "c".repeat(40) } }), { status: 201 });
+      }
+      throw new Error("Unexpected mocked request: " + target);
+    };
+    const ai = {
+      run: async model => {
+        if (model === "@cf/qwen/qwen3.8-27b") {
+          return { response: JSON.stringify({
+            summary: "Подготовлен экран настроек",
+            changes: [{ path: "src/new-screen.jsx", content: "export default function Settings() { return <main>Настройки</main>; }", reason: "Добавить экран настроек" }]
+          }) };
+        }
+        if (model === "@cf/google/gemma-4-26b-a4b-it") {
+          return { response: JSON.stringify({ approved: true, summary: "Изменения корректны.", issues: [] }) };
+        }
+        throw new Error("Unexpected model: " + model);
+      }
+    };
+    try {
+      const response = await worker.fetch(new Request("https://studio.test/api/execute", {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+        body: JSON.stringify({ task: "Добавь экран настроек" })
+      }), { ...env, AI: ai, GITHUB_TOKEN: "test-token", GEMINI_MODEL: "gemini-4-hydrogen" });
+      assert.equal(response.status, 200);
+      const result = await response.json();
+      assert.equal(result.ok, true);
+      assert.match(result.branch, /^ai-studio\/task-/);
+      assert.deepEqual(result.filesChanged.map(file => file.path), ["src/new-screen.jsx"]);
+      assert.equal(result.gemmaReview, "Изменения корректны.");
+      assert.equal(writes.length, 1);
+      assert.equal(writes[0].branch, result.branch);
+      assert.equal(writes[0].content, btoa("export default function Settings() { return <main>Настройки</main>; }"));
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
 });
