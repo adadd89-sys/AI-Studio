@@ -114,3 +114,40 @@
 .diff-column strong{display:block;padding:9px 12px;border-bottom:1px solid #303747;color:#9fa8b9;font-size:9px}
 .diff-column pre{margin:0;padding:12px;white-space:pre-wrap;overflow-wrap:anywhere;color:#d5dbea;font:10px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace}
 @media(max-width:760px){.editor-toolbar{align-items:flex-start;flex-direction:column}.editor-actions{width:100%;justify-content:flex-start}.diff-view{grid-template-columns:1fr}.diff-column{border-right:0;border-bottom:1px solid #303747}}
+
+
+/* Telegram Mini App friendly team controls and usage */
+.settings-page,.usage-page{display:grid;gap:14px}
+.settings-page>.section-heading,.usage-page>.section-heading{align-items:center}
+.settings-card{padding:16px;border:1px solid #303747;border-radius:11px;background:#151923}
+.settings-title{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.settings-title>div{display:grid;gap:5px}
+.settings-title strong,.settings-card>strong{font:650 12px Manrope;color:#e6e8f0}
+.settings-title span,.settings-note{font-size:10px;line-height:1.6;color:#8e97a8}
+.settings-title b{font:700 20px Manrope;color:#c9bfff}
+.intensity-slider{width:100%;margin:20px 0 8px;accent-color:#9987ed}
+.slider-labels{display:flex;justify-content:space-between;gap:8px;color:#7f899a;font-size:8px}
+.mode-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:16px}
+.mode-option{display:grid;gap:7px;align-content:start;min-width:0;padding:12px;border:1px solid #343b4b;border-radius:9px;background:#11151e;color:#aeb5c5;text-align:left}
+.mode-option strong{font-size:10px;color:#dfe2eb}.mode-option span{font-size:9px;line-height:1.45;color:#858fa1}
+.mode-option.selected{border-color:#7163b8;background:#211f32;box-shadow:inset 0 0 0 1px #7163b833}
+.agent-toggle-list{display:grid;gap:0;margin-top:10px}
+.agent-toggle{display:flex;align-items:center;gap:10px;padding:11px 0;border-top:1px solid #292f3d}
+.agent-toggle>span:nth-child(2){display:grid;gap:4px;flex:1;min-width:0}
+.agent-toggle strong{font-size:10px;color:#d9deea}.agent-toggle small{font-size:8px;color:#818b9c;overflow-wrap:anywhere}
+.agent-toggle input{width:18px;height:18px;accent-color:#9584e8}
+.agent-toggle .agent-avatar{width:32px;height:32px;font-size:10px}
+.settings-note{margin:10px 0 0}
+.settings-save-note{display:flex;align-items:center;gap:8px;color:#9dcdb1;font-size:10px}
+.usage-period{display:flex;gap:6px;padding:4px;border:1px solid #303747;border-radius:9px;background:#131722;width:max-content;max-width:100%}
+.usage-period button{border:0;border-radius:6px;background:transparent;color:#929bad;padding:8px 12px;font-size:9px}
+.usage-period button.selected{background:#302b48;color:#ddd5ff}
+.usage-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.usage-metrics article{display:grid;gap:7px;min-width:0;padding:14px;border:1px solid #303747;border-radius:10px;background:#151923}
+.usage-metrics article span{font-size:9px;color:#929bad}.usage-metrics article strong{font:700 20px Manrope;color:#e7e9f2;overflow-wrap:anywhere}.usage-metrics article small{font-size:8px;line-height:1.4;color:#7f899a}
+.external-dashboard-link{display:inline-flex;margin-top:10px;color:#c7bbff;font-size:10px;text-decoration:none}
+.usage-history{display:grid;gap:0;margin-top:10px}
+.usage-history>div{display:grid;gap:5px;padding:11px 0;border-top:1px solid #292f3d}
+.usage-history span,.usage-history small{font-size:8px;color:#818b9c}
+.usage-history strong{font-size:10px;line-height:1.5;color:#d7dce7;overflow-wrap:anywhere}
+@media(max-width:650px){.mode-options{grid-template-columns:1fr}.mode-option{grid-template-columns:20px 1fr;align-items:center}.mode-option span{grid-column:2}.usage-metrics{grid-template-columns:1fr}.usage-metrics article{grid-template-columns:1fr auto;align-items:center}.usage-metrics article small{grid-column:1/-1}.settings-title{align-items:flex-start}}
