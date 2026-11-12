@@ -197,7 +197,8 @@ export default {
         qwenConfigured: Boolean(env.AI),
         openrouterConfigured: Boolean(env.OPENROUTER_API_KEY),
         githubConfigured: Boolean(env.GITHUB_TOKEN),
-        authConfigured: Boolean(env.SESSION_SECRET && (env.APP_PASSWORD || env.TELEGRAM_BOT_TOKEN))
+        authConfigured: Boolean(env.SESSION_SECRET && (env.APP_PASSWORD || env.TELEGRAM_BOT_TOKEN)),
+        telegramAuthConfigured: Boolean(env.TELEGRAM_BOT_TOKEN && env.SESSION_SECRET)
       });
     }
 
