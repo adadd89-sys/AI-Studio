@@ -494,10 +494,17 @@ export default {
         return null;
       }
       function modelText(result) {
+        const message = result?.choices?.[0]?.message;
+        // Workers AI/Qwen may return the generated answer in reasoning_content
+        // while message.content is null or empty. Prefer normal answer fields first.
         const candidates = [
           result?.response,
-          result?.choices?.[0]?.message?.content,
+          message?.content,
           result?.choices?.[0]?.text,
+          message?.reasoning_content,
+          message?.reasoning,
+          result?.choices?.[0]?.delta?.content,
+          result?.choices?.[0]?.delta?.reasoning_content,
           result?.generated_text,
           result?.output_text,
           result?.output,
@@ -601,7 +608,10 @@ export default {
                 "\n\n" + contextText + (feedback ? "\n\nЗамечания Gemma:\n" + feedback : "") +
                 "\n\nПодготовь законченные изменения файлов. Ответ только JSON." }
             ],
-            max_completion_tokens: 4096, temperature: 0.15
+            max_completion_tokens: 4096,
+            reasoning_effort: "low",
+            chat_template_kwargs: { enable_thinking: false },
+            temperature: 0.15
           });
           const rawText = modelText(result);
           const parsed = normalizeQwenPayload(parseJsonObject(rawText));
