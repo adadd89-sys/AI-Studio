@@ -81,6 +81,51 @@ function hasSameOrigin(request) {
   }
 }
 
+
+const GITHUB_REPO = "adadd89-sys/AI-Studio";
+const GITHUB_API = "https://api.github.com";
+
+function validRepoPath(path) {
+  return typeof path === "string" && path.length > 0 && path.length <= 500 &&
+    !path.startsWith("/") && !path.includes("\\") &&
+    path.split("/").every(part => part && part !== "." && part !== "..");
+}
+
+function validAiBranch(branch) {
+  return typeof branch === "string" && branch.startsWith("ai-studio/") &&
+    branch.length <= 120 && /^[a-zA-Z0-9._/-]+$/.test(branch) &&
+    !branch.includes("..") && !branch.endsWith("/") && !branch.includes("//");
+}
+
+async function githubRequest(env, path, options = {}) {
+  const headers = {
+    "accept": "application/vnd.github+json",
+    "x-github-api-version": "2022-11-28",
+    ...(options.body ? { "content-type": "application/json" } : {}),
+    "authorization": "Bearer " + env.GITHUB_TOKEN
+  };
+  const response = await fetch(GITHUB_API + path, { ...options, headers: { ...headers, ...(options.headers || {}) } });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(payload.message || "GitHub API request failed");
+    error.status = response.status;
+    throw error;
+  }
+  return payload;
+}
+
+function githubError(error) {
+  const status = error?.status === 404 ? 404 : error?.status === 409 ? 409 : 502;
+  return json({ error: error?.message || "Не удалось выполнить запрос к GitHub." }, status);
+}
+
+async function requireGithubSession(request, env) {
+  if (!env.APP_PASSWORD || !env.SESSION_SECRET) return json({ error: "Авторизация AI Studio не настроена." }, 503);
+  if (!await isValidSession(request, env.SESSION_SECRET)) return json({ error: "Требуется вход в AI Studio." }, 401);
+  if (!env.GITHUB_TOKEN) return json({ error: "GitHub ещё не подключён. Добавьте секрет GITHUB_TOKEN в Cloudflare Worker." }, 503);
+  return null;
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -91,6 +136,7 @@ export default {
         service: "ai-studio-api",
         modelConfigured: Boolean(env.GEMINI_API_KEY),
         qwenConfigured: Boolean(env.AI),
+        githubConfigured: Boolean(env.GITHUB_TOKEN),
         authConfigured: Boolean(env.APP_PASSWORD && env.SESSION_SECRET)
       });
     }
@@ -280,6 +326,96 @@ export default {
         return json({ ok: true, agent: "Gemma", model, review });
       } catch {
         return json({ error: "Gemma не смогла выполнить проверку. Возможно, временно исчерпан бесплатный лимит Workers AI или модель недоступна." }, 502);
+      }
+    }
+
+
+    if (url.pathname.startsWith("/api/github/")) {
+      const denied = await requireGithubSession(request, env);
+      if (denied) return denied;
+
+      try {
+        if (url.pathname === "/api/github/tree" && request.method === "GET") {
+          const ref = url.searchParams.get("ref") || "main";
+          if (ref !== "main" && !validAiBranch(ref)) return json({ error: "Недопустимая ветка." }, 400);
+          const repo = await githubRequest(env, "/repos/" + GITHUB_REPO);
+          const branch = await githubRequest(env, "/repos/" + GITHUB_REPO + "/git/ref/heads/" + encodeURIComponent(ref).replace(/%2F/gi, "/"));
+          const tree = await githubRequest(env, "/repos/" + GITHUB_REPO + "/git/trees/" + branch.object.sha + "?recursive=1");
+          return json({ ok: true, repository: GITHUB_REPO, branch: ref, files: (tree.tree || []).filter(item => item.type === "blob").map(item => ({ path: item.path, size: item.size || 0 })).slice(0, 500), truncated: Boolean(tree.truncated), defaultBranch: repo.default_branch });
+        }
+
+        if (url.pathname === "/api/github/file" && request.method === "GET") {
+          const path = url.searchParams.get("path") || "";
+          const ref = url.searchParams.get("ref") || "main";
+          if (!validRepoPath(path)) return json({ error: "Недопустимый путь к файлу." }, 400);
+          if (ref !== "main" && !validAiBranch(ref)) return json({ error: "Недопустимая ветка." }, 400);
+          const file = await githubRequest(env, "/repos/" + GITHUB_REPO + "/contents/" + path.split("/").map(encodeURIComponent).join("/") + "?ref=" + encodeURIComponent(ref));
+          if (file.type !== "file" || typeof file.content !== "string") return json({ error: "Поддерживаются только текстовые файлы." }, 415);
+          const content = atob(file.content.replace(/\s/g, ""));
+          const bytes = Uint8Array.from(content, char => char.charCodeAt(0));
+          return json({ ok: true, path, ref, sha: file.sha, content: new TextDecoder("utf-8", { fatal: false }).decode(bytes), size: file.size });
+        }
+
+        if (url.pathname === "/api/github/branches" && request.method === "GET") {
+          const branches = await githubRequest(env, "/repos/" + GITHUB_REPO + "/branches?per_page=100");
+          return json({ ok: true, branches: branches.map(item => item.name).filter(name => name === "main" || validAiBranch(name)) });
+        }
+
+        if (url.pathname === "/api/github/branch" && request.method === "POST") {
+          if (!hasSameOrigin(request)) return json({ error: "Недопустимый источник запроса." }, 403);
+          const body = await request.json().catch(() => null);
+          const branch = body?.branch;
+          if (!validAiBranch(branch)) return json({ error: "Имя ветки должно начинаться с ai-studio/ и содержать только латинские буквы, цифры, точки, дефисы и слеши." }, 400);
+          const base = await githubRequest(env, "/repos/" + GITHUB_REPO + "/git/ref/heads/main");
+          await githubRequest(env, "/repos/" + GITHUB_REPO + "/git/refs", {
+            method: "POST",
+            body: JSON.stringify({ ref: "refs/heads/" + branch, sha: base.object.sha })
+          });
+          return json({ ok: true, branch }, 201);
+        }
+
+        if (url.pathname === "/api/github/file" && request.method === "PUT") {
+          if (!hasSameOrigin(request)) return json({ error: "Недопустимый источник запроса." }, 403);
+          const body = await request.json().catch(() => null);
+          const path = body?.path;
+          const branch = body?.branch;
+          const content = body?.content;
+          const sha = body?.sha;
+          if (!validRepoPath(path)) return json({ error: "Недопустимый путь к файлу." }, 400);
+          if (!validAiBranch(branch)) return json({ error: "Запись разрешена только в отдельные ветки ai-studio/; main защищена." }, 403);
+          if (typeof content !== "string" || content.length > 500000) return json({ error: "Файл пустой или превышает лимит 500 КБ." }, 413);
+          if (sha !== null && sha !== undefined && (typeof sha !== "string" || !/^[a-f0-9]{40}$/i.test(sha))) return json({ error: "Некорректный SHA файла." }, 400);
+          const bytes = new TextEncoder().encode(content);
+          let binary = "";
+          for (const byte of bytes) binary += String.fromCharCode(byte);
+          const payload = { message: typeof body.message === "string" && body.message.trim() ? body.message.trim().slice(0, 120) : "Update " + path, content: btoa(binary), branch };
+          if (sha) payload.sha = sha;
+          const result = await githubRequest(env, "/repos/" + GITHUB_REPO + "/contents/" + path.split("/").map(encodeURIComponent).join("/"), {
+            method: "PUT",
+            body: JSON.stringify(payload)
+          });
+          return json({ ok: true, path, branch, commit: result.commit?.sha || null, sha: result.content?.sha || null });
+        }
+
+        if (url.pathname === "/api/github/file" && request.method === "DELETE") {
+          if (!hasSameOrigin(request)) return json({ error: "Недопустимый источник запроса." }, 403);
+          const body = await request.json().catch(() => null);
+          const path = body?.path;
+          const branch = body?.branch;
+          const sha = body?.sha;
+          if (!validRepoPath(path)) return json({ error: "Недопустимый путь к файлу." }, 400);
+          if (!validAiBranch(branch)) return json({ error: "Удаление разрешено только в отдельные ветки ai-studio/; main защищена." }, 403);
+          if (typeof sha !== "string" || !/^[a-f0-9]{40}$/i.test(sha)) return json({ error: "Для удаления требуется актуальный SHA файла." }, 400);
+          const result = await githubRequest(env, "/repos/" + GITHUB_REPO + "/contents/" + path.split("/").map(encodeURIComponent).join("/"), {
+            method: "DELETE",
+            body: JSON.stringify({ message: "Delete " + path, sha, branch })
+          });
+          return json({ ok: true, path, branch, commit: result.commit?.sha || null });
+        }
+
+        return json({ error: "GitHub API-маршрут не найден." }, 404);
+      } catch (error) {
+        return githubError(error);
       }
     }
 

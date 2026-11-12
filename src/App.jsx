@@ -3,7 +3,7 @@ import {
   Activity, Bot, BrainCircuit, Check, ChevronDown, ChevronRight,
   CircleHelp, Code2, Command, FolderKanban, GitBranch, LayoutDashboard,
   MessageSquare, Plus, Send, Settings2, ShieldCheck, Sparkles, Terminal,
-  Users, Workflow, Zap
+  Users, Workflow, Zap, FileText, Save, RefreshCw, GitCommit, X
 } from 'lucide-react';
 
 const navigation = [
@@ -16,10 +16,206 @@ const navigation = [
 ];
 
 const agents = [
-  { name: 'Gemini', role: 'Планировщик и координатор', tone: 'blue', initials: 'Ge', detail: 'Анализирует запрос, формирует план и распределяет работу.' },
-  { name: 'Gemma 4', role: 'Аналитик и тестировщик', tone: 'green', initials: 'G', detail: 'Независимо проверяет план, риски и критерии готовности.' },
-  { name: 'Qwen 3.8', role: 'Архитектор и ревьюер', tone: 'violet', initials: 'Q', detail: 'Даёт второе независимое мнение и предлагает улучшения.' }
+  { name: 'Gemini 4 Hydrogen', model: 'Google Gemini API · резерв: Gemini 3.8 Flash', role: 'Руководитель и координатор', tone: 'blue', initials: 'Ge', key: 'gemini', detail: 'Разбирает запрос, формирует техническое задание, распределяет работу и объединяет результаты.' },
+  { name: 'Gemma 4 26B', model: 'Cloudflare Workers AI · @cf/google/gemma-4-26b-a4b-it', role: 'Аналитик и контроль качества', tone: 'green', initials: 'G', key: 'gemma', detail: 'Независимо проверяет планы и код, выявляет риски, ошибки и недостающие тесты.' },
+  { name: 'Qwen 3.8 27B', model: 'Cloudflare Workers AI · @cf/qwen/qwen3.8-27b', role: 'Основной разработчик', tone: 'violet', initials: 'Q', key: 'qwen', detail: 'Проектирует архитектуру, пишет и исправляет код. Следующий этап — автоматическое применение изменений в GitHub.' }
 ];
+
+
+function CodeWorkspace() {
+  const [branch, setBranch] = useState('main');
+  const [branches, setBranches] = useState([]);
+  const [files, setFiles] = useState([]);
+  const [selectedPath, setSelectedPath] = useState('');
+  const [fileContent, setFileContent] = useState('');
+  const [originalContent, setOriginalContent] = useState('');
+  const [showDiff, setShowDiff] = useState(false);
+  const [fileSha, setFileSha] = useState(null);
+  const [newBranch, setNewBranch] = useState('ai-studio/my-changes');
+  const [newFilePath, setNewFilePath] = useState('');
+  const [creatingFile, setCreatingFile] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  async function api(url, options) {
+    const response = await fetch(url, options);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || 'Ошибка GitHub API.');
+    return data;
+  }
+
+  async function loadWorkspace(nextBranch = branch) {
+    setLoading(true);
+    setError('');
+    try {
+      const [branchData, treeData] = await Promise.all([
+        api('/api/github/branches'),
+        api('/api/github/tree?ref=' + encodeURIComponent(nextBranch))
+      ]);
+      setBranches(branchData.branches || []);
+      setFiles(treeData.files || []);
+      setBranch(nextBranch);
+      if (selectedPath && !(treeData.files || []).some(file => file.path === selectedPath)) {
+        setSelectedPath('');
+        setFileContent('');
+        setFileSha(null);
+      }
+    } catch (err) {
+      setError(err.message || 'Не удалось загрузить репозиторий.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { loadWorkspace('main'); }, []);
+
+  async function openFile(path) {
+    setSelectedPath(path);
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const data = await api('/api/github/file?ref=' + encodeURIComponent(branch) + '&path=' + encodeURIComponent(path));
+      setFileContent(data.content);
+      setOriginalContent(data.content);
+      setShowDiff(false);
+      setFileSha(data.sha);
+    } catch (err) {
+      setError(err.message || 'Не удалось открыть файл.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createBranch() {
+    const name = newBranch.trim();
+    if (!name || busy) return;
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      await api('/api/github/branch', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ branch: name })
+      });
+      setNotice('Ветка создана. Теперь можно редактировать файлы, не затрагивая main.');
+      await loadWorkspace(name);
+    } catch (err) {
+      setError(err.message || 'Не удалось создать ветку.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveFile() {
+    if (!selectedPath || branch === 'main' || busy) return;
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const data = await api('/api/github/file', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ path: selectedPath, branch, content: fileContent, sha: fileSha, message: 'Update ' + selectedPath })
+      });
+      setFileSha(data.sha);
+      setOriginalContent(fileContent);
+      setShowDiff(false);
+      setNotice('Изменения сохранены в ветку ' + branch + '. Коммит: ' + (data.commit || '').slice(0, 7));
+      await loadWorkspace(branch);
+    } catch (err) {
+      setError(err.message || 'Не удалось сохранить файл.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteFile() {
+    if (!selectedPath || branch === 'main' || busy) return;
+    if (!window.confirm('Удалить файл ' + selectedPath + ' из ветки ' + branch + '?')) return;
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      await api('/api/github/file', {
+        method: 'DELETE',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ path: selectedPath, branch, sha: fileSha })
+      });
+      setNotice('Файл ' + selectedPath + ' удалён из ветки ' + branch + '.');
+      setSelectedPath('');
+      setFileContent('');
+      setOriginalContent('');
+      setFileSha(null);
+      setShowDiff(false);
+      await loadWorkspace(branch);
+    } catch (err) {
+      setError(err.message || 'Не удалось удалить файл.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createFile() {
+    const path = newFilePath.trim();
+    if (!path || branch === 'main' || busy) return;
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      await api('/api/github/file', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ path, branch, content: '', sha: null, message: 'Create ' + path })
+      });
+      setNewFilePath('');
+      setCreatingFile(false);
+      setNotice('Новый файл создан в ветке ' + branch + '.');
+      await loadWorkspace(branch);
+      await openFile(path);
+    } catch (err) {
+      setError(err.message || 'Не удалось создать файл.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <section className="code-workspace">
+    <div className="code-workspace-heading">
+      <div><div className="eyebrow">GITHUB WORKSPACE</div><h2>Код и файлы</h2><p>adadd89-sys / AI-Studio · изменения сохраняются отдельными коммитами</p></div>
+      <button className="subtle-button" onClick={() => loadWorkspace(branch)} disabled={loading || busy}><RefreshCw size={14}/> Обновить</button>
+    </div>
+    <div className="repo-toolbar">
+      <label><GitBranch size={15}/> Ветка
+        <select value={branch} onChange={event => loadWorkspace(event.target.value)} disabled={busy}>
+          {(branches.includes('main') ? branches : ['main', ...branches]).map(name => <option key={name} value={name}>{name}</option>)}
+        </select>
+      </label>
+      <div className="branch-create"><input value={newBranch} onChange={event => setNewBranch(event.target.value)} aria-label="Название новой ветки"/><button onClick={createBranch} disabled={busy || !newBranch.trim()}><GitPlus size={14}/> Создать ветку</button></div>
+    </div>
+    {branch === 'main' && <div className="main-protection"><ShieldCheck size={15}/> Ветка main доступна только для чтения. Создайте отдельную ветку перед сохранением изменений.</div>}
+    {error && <div className="task-error" role="alert">{error}</div>}
+    {notice && <div className="workspace-notice">{notice}</div>}
+    {loading ? <div className="workspace-empty">Загружаем список файлов GitHub…</div> :
+      <div className="code-layout">
+        <aside className="file-browser">
+          <div className="file-browser-heading"><strong><FolderKanban size={14}/> Файлы репозитория</strong><button title="Создать файл" onClick={() => setCreatingFile(value => !value)} disabled={branch === 'main'}><Plus size={15}/></button></div>
+          {creatingFile && <div className="new-file-row"><input value={newFilePath} onChange={event => setNewFilePath(event.target.value)} placeholder="папка/файл.js"/><button onClick={createFile} disabled={busy || !newFilePath.trim()}>Создать</button></div>}
+          <div className="file-list">{files.map(file => <button key={file.path} className={selectedPath === file.path ? 'file-item selected' : 'file-item'} onClick={() => openFile(file.path)}><FileText size={13}/><span>{file.path}</span><small>{file.size ? Math.ceil(file.size / 1024) + ' KB' : ''}</small></button>)}</div>
+          {!files.length && <div className="workspace-empty">Файлы не найдены.</div>}
+        </aside>
+        <section className="code-editor">
+          <div className="editor-toolbar"><strong>{selectedPath || 'Выберите файл слева'}</strong><div className="editor-actions"><button onClick={() => setShowDiff(value => !value)} disabled={!selectedPath || busy}>{showDiff ? 'Редактор' : 'Сравнить'}</button><button className="delete-file-button" onClick={deleteFile} disabled={!selectedPath || branch === 'main' || busy}><X size={14}/> Удалить</button><button onClick={saveFile} disabled={!selectedPath || branch === 'main' || busy}><Save size={14}/> Сохранить в GitHub</button></div></div>
+          {selectedPath ? (showDiff ? <div className="diff-view"><div className="diff-column"><strong>Версия в GitHub</strong><pre>{originalContent || ' '}</pre></div><div className="diff-column"><strong>Текущая версия</strong><pre>{fileContent || ' '}</pre></div></div> : <textarea spellCheck="false" value={fileContent} onChange={event => setFileContent(event.target.value)} readOnly={branch === 'main'} aria-label="Содержимое файла"/>) : <div className="workspace-empty editor-empty">Выберите текстовый файл, чтобы просмотреть или отредактировать его.</div>}
+          {busy && <div className="editor-busy">Выполняем запрос…</div>}
+        </section>
+      </div>}
+    <div className="workspace-footnote"><GitCommit size={13}/> Доступны просмотр, сравнение версий, создание, редактирование и удаление файлов, а также коммиты только в отдельной ветке.</div>
+  </section>;
+}
 
 function App() {
   const [active, setActive] = useState('Обзор');
@@ -30,6 +226,7 @@ function App() {
   const [taskError, setTaskError] = useState('');
   const [lastPlan, setLastPlan] = useState(null);
   const [geminiHealth, setGeminiHealth] = useState(null);
+  const [geminiCallStatus, setGeminiCallStatus] = useState(null);
   const [authState, setAuthState] = useState('checking');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
@@ -78,6 +275,7 @@ function App() {
     setGemmaReview(null);
     setQwenReview(null);
     setReviewStatus('План готов. Запускаем независимую проверку Gemma и Qwen…');
+    setGeminiCallStatus(null);
     try {
       const response = await fetch('/api/plan', {
         method: 'POST',
@@ -86,6 +284,7 @@ function App() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Не удалось составить план.');
+      setGeminiCallStatus(true);
       const normalizedPlan = { title: value, ...data.plan, model: data.model, primaryModel: data.primaryModel || data.model, fallbackUsed: Boolean(data.fallbackUsed) };
       setLastPlan(normalizedPlan);
       const reviewPlan = [
@@ -114,6 +313,7 @@ function App() {
       setTask('');
       setActive('Процессы');
     } catch (error) {
+      setGeminiCallStatus(false);
       setTaskError(error.message || 'Не удалось связаться с сервером.');
     } finally {
       setIsSubmitting(false);
@@ -148,7 +348,7 @@ function App() {
         <div className="sidebar-bottom">
           <button className="nav-item" onClick={() => setActive('Настройки')}><Settings2 size={17} /><span>Настройки</span></button>
           <div className="github-card">
-            <div className="github-top"><GitBranch size={15} /><span>GitHub подключён</span><span className="online-dot" /></div>
+            <div className="github-top"><GitBranch size={15} /><span>GitHub workspace</span><span className="online-dot" /></div>
             <strong>adadd89-sys / AI-Studio</strong>
             <small>Ветка main</small>
           </div>
@@ -163,6 +363,7 @@ function App() {
         </header>
 
         <div className="page-content">
+          {active === 'Код и файлы' ? <CodeWorkspace /> : <>
           <section className="welcome-row">
             <div><div className="eyebrow"><Sparkles size={14} /> ВАША AI-КОМАНДА</div><h1>{active === 'Обзор' ? 'Всё начинается с идеи.' : title}</h1><p>Ставьте задачу — команда ИИ поможет превратить её в готовый продукт.</p></div>
             <div className="system-status"><span className="status-pulse" /> Система готова к работе</div>
@@ -195,11 +396,17 @@ function App() {
           <section className="section-block">
             <div className="section-heading"><div><div className="eyebrow">ВАШИ СПЕЦИАЛИСТЫ</div><h2>Команда ИИ</h2></div><button className="subtle-button" onClick={() => setActive('Команда ИИ')}>Вся команда <ChevronRight size={15} /></button></div>
             <div className="agent-grid">
-              {agents.map(agent => <article className="agent-card" key={agent.name}>
-                <div className="agent-card-top"><div className={'agent-avatar ' + agent.tone}>{agent.initials}</div><span className="agent-status"><span /> {agent.name === 'Gemini' ? (geminiHealth === null ? 'Проверяем API…' : geminiHealth.modelConfigured ? 'API-ключ настроен' : 'Нужен API-ключ') : agent.name === 'Qwen 3.8' ? (geminiHealth?.qwenConfigured ? 'Workers AI подключён' : 'Нет AI binding') : 'Workers AI'}</span></div>
-                <h3>{agent.name}</h3><div className="agent-role">{agent.role}</div><p>{agent.detail}</p>
-                <div className="agent-card-bottom"><span><ShieldCheck size={14} /> Роль назначена</span><ChevronRight size={16} /></div>
-              </article>)}
+              {agents.map(agent => {
+                const configured = agent.key === 'gemini' ? Boolean(geminiHealth?.modelConfigured) : Boolean(geminiHealth?.qwenConfigured);
+                const result = agent.key === 'gemini' ? geminiCallStatus : agent.key === 'gemma' ? gemmaReview?.ok : qwenReview?.ok;
+                const failed = agent.key === 'gemini' ? geminiCallStatus === false : (agent.key === 'gemma' ? gemmaReview?.ok === false : qwenReview?.ok === false);
+                const status = result === true ? 'Ответ получен' : failed ? 'Ошибка вызова' : configured ? 'Подключение настроено · ждёт теста' : geminiHealth === null ? 'Проверяем подключение…' : 'Не настроено';
+                return <article className="agent-card" key={agent.key}>
+                  <div className="agent-card-top"><div className={'agent-avatar ' + agent.tone}>{agent.initials}</div><span className={'agent-status ' + (result === true ? 'is-working' : failed ? 'is-error' : 'is-configured')}><span /> {status}</span></div>
+                  <h3>{agent.name}</h3><div className="agent-role">{agent.role}</div><div className="agent-model">{agent.model}</div><p>{agent.detail}</p>
+                  <div className="agent-card-bottom"><span><ShieldCheck size={14} /> {result === true ? 'Генерация подтверждена' : configured ? 'Провайдер настроен' : 'Требуется настройка'}</span><ChevronRight size={16} /></div>
+                </article>;
+              })}
             </div>
           </section>
 
@@ -217,6 +424,7 @@ function App() {
             </div></div>
           </section>
           <footer className="page-footer"><span>AI STUDIO <span className="footer-dot">·</span> Версия 0.1.0</span><span><Zap size={13} /> Создаём с помощью ИИ</span></footer>
+          </>}
         </div>
       </main>
     </div>
