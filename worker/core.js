@@ -573,8 +573,6 @@ export default {
       if (!env.APP_PASSWORD || !env.SESSION_SECRET) return json({ error: "Авторизация ещё не настроена." }, 503);
       if (!await isValidSession(request, env.SESSION_SECRET)) return json({ error: "Требуется вход в AI Studio." }, 401);
       if (!hasSameOrigin(request)) return json({ error: "Недопустимый источник запроса." }, 403);
-      if (!env.GEMINI_API_KEY) return json({ error: "Gemini API не подключён." }, 503);
-      if (!env.AI) return json({ error: "Workers AI не подключён. Нужны Qwen и Gemma." }, 503);
       if (!env.GITHUB_TOKEN) return json({ error: "GitHub не подключён. Проверьте GITHUB_TOKEN." }, 503);
 
       let body;
