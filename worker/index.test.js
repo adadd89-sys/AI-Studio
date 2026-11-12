@@ -462,7 +462,7 @@ describe("AI Studio Worker", () => {
           }) }] } }]
         }), { status: 200, headers: { "content-type": "application/json" } });
       }
-      if (target.includes("/git/trees/main?recursive=1")) {
+      if (target.includes("/git/trees/") && target.includes("?recursive=1")) {
         return new Response(JSON.stringify({ tree: [{ path: "src/App.jsx", type: "blob" }] }), { status: 200 });
       }
       if (target.includes("/contents/src/App.jsx?ref=main")) {
