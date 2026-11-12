@@ -113,6 +113,36 @@ describe("AI Studio Worker", () => {
     }
   });
 
+  it("checks model availability without generating content", async () => {
+    const originalFetch = globalThis.fetch;
+    let requestedUrl = "";
+    globalThis.fetch = async (url, options) => {
+      requestedUrl = String(url);
+      assert.equal(options.headers["x-goog-api-key"], env.GEMINI_API_KEY);
+      return new Response(JSON.stringify({ models: [{
+        name: "models/gemini-4-hydrogen",
+        displayName: "Gemini 4 Hydrogen",
+        supportedGenerationMethods: ["generateContent"],
+        inputTokenLimit: 1048576,
+        outputTokenLimit: 8192
+      }] }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    try {
+      const cookie = await getSessionCookie();
+      const response = await worker.fetch(new Request("https://studio.test/api/models/check", {
+        headers: { cookie }
+      }), env);
+      assert.equal(response.status, 200);
+      const result = await response.json();
+      assert.equal(result.found, true);
+      assert.equal(result.supportsGenerateContent, true);
+      assert.match(requestedUrl, /\/models\?/);
+      assert.doesNotMatch(requestedUrl, /generateContent/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("returns a rate-limit message when Gemini responds with 429", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () => new Response("{}", { status: 429 });
