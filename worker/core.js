@@ -42,9 +42,38 @@ async function verifyWorkflowSignature(value, signature, secret) {
   } catch { return false; }
 }
 
-async function createSession(secret) {
+
+async function verifyTelegramInitData(initData, botToken) {
+  if (typeof initData !== "string" || !initData || initData.length > 12000 || !botToken) return null;
+  try {
+    const params = new URLSearchParams(initData);
+    const receivedHash = (params.get("hash") || "").toLowerCase();
+    if (!/^[a-f0-9]{64}$/.test(receivedHash)) return null;
+    params.delete("hash");
+    const entries = [...params.entries()].sort(([left], [right]) => left.localeCompare(right));
+    const checkString = entries.map(([key, value]) => key + "=" + value).join("\n");
+    const webAppKey = await crypto.subtle.importKey("raw", new TextEncoder().encode("WebAppData"),
+      { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const secret = await crypto.subtle.sign("HMAC", webAppKey, new TextEncoder().encode(botToken));
+    const validationKey = await crypto.subtle.importKey("raw", secret, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const digest = new Uint8Array(await crypto.subtle.sign("HMAC", validationKey, new TextEncoder().encode(checkString)));
+    const calculatedHash = [...digest].map(byte => byte.toString(16).padStart(2, "0")).join("");
+    let mismatch = calculatedHash.length ^ receivedHash.length;
+    for (let i = 0; i < Math.min(calculatedHash.length, receivedHash.length); i++) mismatch |= calculatedHash.charCodeAt(i) ^ receivedHash.charCodeAt(i);
+    if (mismatch !== 0) return null;
+    const authDate = Number(params.get("auth_date"));
+    const now = Math.floor(Date.now() / 1000);
+    if (!Number.isInteger(authDate) || authDate > now + 60 || now - authDate > 86400) return null;
+    const user = JSON.parse(params.get("user") || "null");
+    if (!user || !Number.isSafeInteger(user.id)) return null;
+    return user;
+  } catch { return null; }
+}
+
+async function createSession(secret, identity = {}) {
   const payload = toBase64Url(new TextEncoder().encode(JSON.stringify({
-    exp: Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS
+    exp: Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS,
+    ...(Number.isSafeInteger(identity.telegramUserId) ? { telegramUserId: identity.telegramUserId } : {})
   })));
   const signature = toBase64Url(await sign(payload, secret));
   return payload + "." + signature;
@@ -168,14 +197,28 @@ export default {
         qwenConfigured: Boolean(env.AI),
         openrouterConfigured: Boolean(env.OPENROUTER_API_KEY),
         githubConfigured: Boolean(env.GITHUB_TOKEN),
-        authConfigured: Boolean(env.APP_PASSWORD && env.SESSION_SECRET)
+        authConfigured: Boolean(env.SESSION_SECRET && (env.APP_PASSWORD || env.TELEGRAM_BOT_TOKEN))
       });
     }
 
     if (url.pathname === "/api/session" && request.method === "GET") {
       return json({
         authenticated: await isValidSession(request, env.SESSION_SECRET),
-        authConfigured: Boolean(env.APP_PASSWORD && env.SESSION_SECRET)
+        authConfigured: Boolean(env.SESSION_SECRET && (env.APP_PASSWORD || env.TELEGRAM_BOT_TOKEN)),
+        telegramAuthConfigured: Boolean(env.TELEGRAM_BOT_TOKEN && env.SESSION_SECRET)
+      });
+    }
+
+
+    if (url.pathname === "/api/telegram-login" && request.method === "POST") {
+      if (!hasSameOrigin(request)) return json({ error: "Недопустимый источник запроса." }, 403);
+      if (!env.TELEGRAM_BOT_TOKEN || !env.SESSION_SECRET) return json({ error: "Telegram-вход не настроен. Добавьте TELEGRAM_BOT_TOKEN и SESSION_SECRET в секреты Worker." }, 503);
+      const body = await request.json().catch(() => null);
+      const user = await verifyTelegramInitData(body?.initData, env.TELEGRAM_BOT_TOKEN);
+      if (!user) return json({ error: "Подпись Telegram недействительна или данные авторизации устарели." }, 401);
+      const token = await createSession(env.SESSION_SECRET, { telegramUserId: user.id });
+      return json({ ok: true }, 200, {
+        "set-cookie": SESSION_COOKIE + "=" + token + "; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=" + SESSION_TTL_SECONDS
       });
     }
 
