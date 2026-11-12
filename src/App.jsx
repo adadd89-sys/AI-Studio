@@ -251,6 +251,7 @@ function App() {
     try { return JSON.parse(localStorage.getItem('ai-studio-usage-events') || '[]'); } catch { return []; }
   });
   const [usagePeriod, setUsagePeriod] = useState('today');
+  const [chatMessages, setChatMessages] = useState([]);
 
   useEffect(() => {
     localStorage.setItem('ai-studio-team-settings', JSON.stringify(teamSettings));
@@ -309,6 +310,19 @@ function App() {
     if (!value || isSubmitting) return;
     setIsSubmitting(true);
     setTaskError('');
+    if (teamSettings.mode === 'chat') {
+      try {
+        const response = await fetch('/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: value, history: chatMessages, teamSettings }) });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Не удалось получить ответ агента.');
+        setChatMessages(current => [...current, { role: 'user', content: value }, { role: 'assistant', content: data.reply, agent: data.agent }].slice(-24));
+        setUsageEvents(current => [{ id: Date.now(), at: new Date().toISOString(), mode: 'chat', intensity: teamSettings.intensity, agents: data.agentsUsed || [data.agent], requests: data.usage?.requests ?? 1, neurons: null, task: value.slice(0,160) }, ...current].slice(0,300));
+        setTask('');
+        setReviewStatus('Ответ получен от ' + data.agent + '. В режиме общения разработка и GitHub не запускаются.');
+      } catch (error) { setTaskError(error.message || 'Не удалось получить ответ.'); }
+      finally { setIsSubmitting(false); }
+      return;
+    }
     setLastPlan(null);
     setExecutionResult(null);
     setGemmaReview(null);
@@ -462,12 +476,13 @@ function App() {
           </section>
 
           <section className="task-panel">
-            <div className="task-panel-heading"><div className="task-icon"><Command size={18} /></div><div><h2>Новая задача</h2><p>Опишите, что нужно создать или улучшить</p></div><span className="task-step">01 / ЗАПУСК</span></div>
+            <div className="task-panel-heading"><div className="task-icon"><Command size={18} /></div><div><h2>Новая задача</h2><p>{teamSettings.mode === 'chat' ? 'Обычный разговор без запуска разработки и GitHub' : 'Опишите, что нужно создать или улучшить'}</p></div><span className="task-step">01 / ЗАПУСК</span></div>
             <form onSubmit={submitTask}>
-              <textarea value={task} onChange={e => setTask(e.target.value)} placeholder="Например: создай Telegram-бота для записи клиентов, продумай архитектуру, напиши код и проверь его..." rows={3} />
-              <div className="composer-footer"><div className="composer-hint"><Sparkles size={14} /> Gemini планирует · Qwen разрабатывает · Gemma проверяет</div><button className="primary-button" type="submit" disabled={!task.trim() || isSubmitting}>{isSubmitting ? 'Команда работает…' : 'Запустить команду'} <Send size={15} /></button></div>
+              <textarea value={task} onChange={e => setTask(e.target.value)} placeholder={teamSettings.mode === 'chat' ? "Напишите сообщение команде…" : "Например: создай Telegram-бота для записи клиентов, продумай архитектуру, напиши код и проверь его..."} rows={3} />
+              <div className="composer-footer"><div className="composer-hint"><Sparkles size={14} /> Gemini планирует · Qwen разрабатывает · Gemma проверяет</div><button className="primary-button" type="submit" disabled={!task.trim() || isSubmitting}>{isSubmitting ? (teamSettings.mode === 'chat' ? 'Отвечаем…' : 'Команда работает…') : (teamSettings.mode === 'chat' ? 'Отправить' : 'Запустить команду')} <Send size={15} /></button></div>
             </form>
             {taskError && <div className="task-error" role="alert">{taskError}</div>}
+            {teamSettings.mode === 'chat' && chatMessages.length > 0 && <div className="chat-thread">{chatMessages.map((item,index) => <div key={index} className={'chat-message ' + item.role}><span>{item.role === 'user' ? 'Вы' : item.agent || 'AI Studio'}</span><p>{item.content}</p></div>)}</div>}
             {lastPlan && <div className="generated-plan">
               <div className="plan-header"><div><span className="eyebrow">ПЛАН ОТ GEMINI</span><h3>{lastPlan.summary}</h3></div><div className="plan-model-stack"><span className="plan-model">{lastPlan.model}</span><span className={lastPlan.fallbackUsed ? 'model-route fallback' : 'model-route'}>{lastPlan.fallbackUsed ? 'Резервное переключение' : 'Основная модель'}</span></div></div>
               <div className={lastPlan.fallbackUsed ? 'model-info fallback' : 'model-info'}>{lastPlan.fallbackUsed ? <>Основная модель <strong>{lastPlan.primaryModel}</strong> была недоступна. Ответ получен от резервной модели <strong>{lastPlan.model}</strong>.</> : <>Запрос выполнен основной моделью <strong>{lastPlan.model}</strong>. Резервная модель не потребовалась.</>}</div>
