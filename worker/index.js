@@ -106,10 +106,26 @@ async function githubRequest(env, path, options = {}) {
   };
   const method = (options.method || "GET").toUpperCase();
   const response = await fetch(GITHUB_API + path, { ...options, headers: { ...headers, ...(options.headers || {}) } });
-  const payload = await response.json().catch(() => ({}));
+  const responseText = await response.text();
+  let payload = {};
+  try { payload = responseText ? JSON.parse(responseText) : {}; } catch { payload = {}; }
   if (!response.ok) {
-    const githubMessage = typeof payload.message === "string" ? payload.message : "GitHub не вернул описание ошибки";
-    const error = new Error("GitHub API: HTTP " + response.status + " (" + method + " " + path + "): " + githubMessage);
+    const githubMessage = typeof payload.message === "string"
+      ? payload.message
+      : (responseText ? responseText.replace(/\\s+/g, " ").slice(0, 350) : "пустое тело ответа");
+    const requestId = response.headers.get("x-github-request-id");
+    const rateRemaining = response.headers.get("x-ratelimit-remaining");
+    const rateResource = response.headers.get("x-ratelimit-resource");
+    const sso = response.headers.get("x-github-sso");
+    const contentType = response.headers.get("content-type");
+    const details = [
+      "request-id=" + (requestId || "нет"),
+      "rate-remaining=" + (rateRemaining || "нет"),
+      "rate-resource=" + (rateResource || "нет"),
+      "content-type=" + (contentType || "нет"),
+      sso ? "github-sso=" + sso.slice(0, 180) : ""
+    ].filter(Boolean).join("; ");
+    const error = new Error("GitHub API: HTTP " + response.status + " (" + method + " " + path + "): " + githubMessage + " [" + details + "]");
     error.status = response.status;
     error.endpoint = path;
     error.method = method;
