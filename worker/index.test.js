@@ -36,6 +36,7 @@ describe("AI Studio Worker", () => {
       qwenConfigured: false,
       openrouterConfigured: false,
       telegramAuthConfigured: false,
+      passwordAuthConfigured: false,
       githubConfigured: false,
       authConfigured: false
     });
