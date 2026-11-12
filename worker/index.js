@@ -397,6 +397,22 @@ export default {
           return json({ ok: true, path, branch, commit: result.commit?.sha || null, sha: result.content?.sha || null });
         }
 
+        if (url.pathname === "/api/github/file" && request.method === "DELETE") {
+          if (!hasSameOrigin(request)) return json({ error: "Недопустимый источник запроса." }, 403);
+          const body = await request.json().catch(() => null);
+          const path = body?.path;
+          const branch = body?.branch;
+          const sha = body?.sha;
+          if (!validRepoPath(path)) return json({ error: "Недопустимый путь к файлу." }, 400);
+          if (!validAiBranch(branch)) return json({ error: "Удаление разрешено только в отдельные ветки ai-studio/; main защищена." }, 403);
+          if (typeof sha !== "string" || !/^[a-f0-9]{40}$/i.test(sha)) return json({ error: "Для удаления требуется актуальный SHA файла." }, 400);
+          const result = await githubRequest(env, "/repos/" + GITHUB_REPO + "/contents/" + path.split("/").map(encodeURIComponent).join("/"), {
+            method: "DELETE",
+            body: JSON.stringify({ message: "Delete " + path, sha, branch })
+          });
+          return json({ ok: true, path, branch, commit: result.commit?.sha || null });
+        }
+
         return json({ error: "GitHub API-маршрут не найден." }, 404);
       } catch (error) {
         return githubError(error);
