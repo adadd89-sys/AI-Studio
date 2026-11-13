@@ -667,7 +667,12 @@ export default {
           if (!env.GEMINI_API_KEY) return json({ error: "Gemini включён, но GEMINI_API_KEY не настроен." }, 503);
           const configuredModel = agent === "gemini" && FREE_GEMINI_MODELS.has(env.GEMINI_MODEL) ? env.GEMINI_MODEL : GEMINI_AGENT_MODELS[agent];
           const model = FREE_GEMINI_MODELS.has(configuredModel) ? configuredModel : GEMINI_AGENT_MODELS[agent];
-          const fallbackModel = model === GEMINI_AGENT_MODELS.gemini38 ? GEMINI_AGENT_MODELS.gemini36 : GEMINI_AGENT_MODELS.gemini38;
+          const fallbackModels = [...new Set([
+            model,
+            GEMINI_AGENT_MODELS.gemini38,
+            GEMINI_AGENT_MODELS.gemini36,
+            GEMINI_AGENT_MODELS.geminiLite
+          ])];
           let activeModel = model;
           const repositoryTask = /репозитор|github|файл|код|исправ|разработ|реализ|приложен|проект|ошибк|баг|интерфейс|компонент|worker|api|депло|сборк/i.test(message);
           const repositoryContext = repositoryTask ? await buildGeminiRepositoryContext(env, message) : "";
@@ -688,10 +693,13 @@ export default {
                 generationConfig: { temperature: 0.35, maxOutputTokens: scaledTokenBudget(intensity, 2048, 8192) }
               })
             };
-            let response = await fetchGeminiWithRetry(requestUrl, requestOptions);
-            if (!response.ok && [408, 429, 500, 502, 503, 504].includes(response.status) && activeModel !== fallbackModel) {
-              activeModel = fallbackModel;
-              response = await fetchGeminiWithRetry("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(activeModel) + ":generateContent?key=" + encodeURIComponent(env.GEMINI_API_KEY), requestOptions);
+            let response;
+            const firstModelIndex = Math.max(0, fallbackModels.indexOf(activeModel));
+            for (const candidateModel of fallbackModels.slice(firstModelIndex)) {
+              activeModel = candidateModel;
+              const candidateUrl = "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(candidateModel) + ":generateContent?key=" + encodeURIComponent(env.GEMINI_API_KEY);
+              response = await fetchGeminiWithRetry(candidateUrl, requestOptions);
+              if (response.ok || ![408, 429, 500, 502, 503, 504].includes(response.status)) break;
             }
             if (!response.ok) {
               const errorPayload = await response.json().catch(() => ({}));
@@ -723,7 +731,8 @@ export default {
             contents.push({ role: "user", parts: functionResponses });
           }
           if (!reply.trim()) {
-            const finalModel = activeModel === model ? fallbackModel : model;
+            const finalModelIndex = Math.min(Math.max(0, fallbackModels.indexOf(activeModel)) + 1, fallbackModels.length - 1);
+            const finalModel = fallbackModels[finalModelIndex];
             const finalContents = contents.slice();
             const finalInstruction = "Заверши ответ пользователю на русском языке. Если ты уже выполнил действия с инструментами, кратко сообщи результат и важные детали. Если действия не выполнялись, прямо ответь на исходный вопрос. Не вызывай инструменты; дай обычный текстовый ответ.";
             const lastContent = finalContents[finalContents.length - 1];
