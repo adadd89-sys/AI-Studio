@@ -997,6 +997,9 @@ describe("AI Studio Worker", () => {
       assert.ok(payload.reply.includes("**Gemma:** Gemma замечаний не нашла."));
       assert.deepEqual(new Set(consulted), new Set(["@cf/qwen/qwen3.8-27b", "@cf/google/gemma-4-26b-a4b-it"]));
       assert.equal(consulted.length, 2);
+      assert.deepEqual(new Set(payload.agentsUsed), new Set(["gemini", "qwen", "gemma"]));
+      assert.equal(payload.usage.requests, 3);
+      assert.equal(payload.consultationFailures, 0);
     } finally { globalThis.fetch = originalFetch; }
   });
 
