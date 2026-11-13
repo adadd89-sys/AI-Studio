@@ -5,6 +5,25 @@ const FREE_GEMINI_MODELS = new Set(["gemini-4-hydrogen", "gemini-3.8-flash", "ge
 const GEMINI_AGENT_MODELS = { gemini: "gemini-4-hydrogen", gemini38: "gemini-3.8-flash", gemini36: "gemini-3.6-flash", geminiLite: "gemini-3.5-flash-lite", gemini31Lite: "gemini-3.1-flash-lite" };
 const GEMINI_AGENT_LABELS = { gemini: "Gemini 4 Hydrogen", gemini38: "Gemini 3.8 Flash", gemini36: "Gemini 3.6 Flash", geminiLite: "Gemini 3.5 Flash-Lite", gemini31Lite: "Gemini 3.1 Flash-Lite" };
 
+export function normalizeWorkflowTeamSettings(rawSettings = {}) {
+  const agents = rawSettings?.agents && typeof rawSettings.agents === "object" ? rawSettings.agents : {};
+  return {
+    intensity: rawSettings?.mode === "max" ? 100 : Math.max(0, Math.min(100,
+      Number.isFinite(Number(rawSettings?.intensity)) ? Math.round(Number(rawSettings.intensity) / 5) * 5 : 60)),
+    mode: ["chat", "normal", "max"].includes(rawSettings?.mode) ? rawSettings.mode : "normal",
+    agents: {
+      gemini: agents.gemini !== false,
+      gemini38: agents.gemini38 === true,
+      gemini36: agents.gemini36 === true,
+      geminiLite: agents.geminiLite === true,
+      gemini31Lite: agents.gemini31Lite === true,
+      qwen: agents.qwen !== false,
+      gemma: agents.gemma !== false,
+      north: agents.north === true
+    }
+  };
+}
+
 function scaledTokenBudget(intensity, minimum, maximum) {
   const level = Math.max(0, Math.min(100, Number.isFinite(Number(intensity)) ? Number(intensity) : 60));
   return Math.round(minimum + (maximum - minimum) * level / 100);
