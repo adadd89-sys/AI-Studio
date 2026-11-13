@@ -410,6 +410,7 @@ function App() {
       setTasks(current => [jobRecord, ...current.filter(item => item.jobId !== started.jobId)].slice(0, 100));
       let data = null;
       let completed = false;
+      let workflowFailed = false;
       for (let attempt = 0; attempt < 300; attempt++) {
         await new Promise(resolve => setTimeout(resolve, 2000));
         const statusResponse = await fetch('/api/execute/' + encodeURIComponent(started.jobId));
@@ -417,12 +418,13 @@ function App() {
         if (!statusResponse.ok) throw new Error(statusData.error || 'Не удалось получить статус задачи.');
         if (statusData.status === 'complete') {
           data = statusData.output?.data || null;
-          if (!data) throw new Error('Workflow завершился без результата выполнения.');
-          if (statusData.output?.httpStatus >= 400 || data.error) throw new Error(data.error || 'Команда ИИ не смогла выполнить задачу.');
+          if (!data) { workflowFailed = true; throw new Error('Workflow завершился без результата выполнения.'); }
+          if (statusData.output?.httpStatus >= 400 || data.error) { workflowFailed = true; throw new Error(data.error || 'Команда ИИ не смогла выполнить задачу.'); }
           completed = true;
           break;
         }
         if (statusData.status === 'errored' || statusData.status === 'terminated') {
+          workflowFailed = true;
           throw new Error(statusData.error?.message || 'Асинхронная задача завершилась с ошибкой.');
         }
         const nextState = statusData.status === 'queued' ? 'queued' : 'running';
@@ -476,8 +478,8 @@ function App() {
     } catch (error) {
       setGeminiCallStatus(null);
       if (submittedJobId) setTasks(current => current.map(item => item.jobId === submittedJobId && item.state !== 'complete'
-        ? { ...item, state: error.message?.includes('продолжает выполняться') ? 'running' : 'failed',
-            status: error.message?.includes('продолжает выполняться') ? 'Выполняется' : 'Ошибка выполнения',
+        ? { ...item, state: workflowFailed ? 'failed' : 'running',
+            status: workflowFailed ? 'Ошибка выполнения' : 'Выполняется',
             error: error.message || 'Не удалось связаться с командой ИИ.' }
         : item));
       setTaskError(error.message || 'Не удалось связаться с командой ИИ.');
