@@ -180,3 +180,19 @@
 .process-links{display:flex;flex-wrap:wrap;gap:12px}
 .process-links a{color:#c7bbff;font-size:9px;text-decoration:none}
 @media(max-width:650px){.process-card{padding:12px}.process-card-heading{flex-direction:column}.process-state{align-self:flex-start}}
+
+
+.projects-page { display: flex; flex-direction: column; gap: 18px; }
+.project-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 14px; }
+.project-card { display: flex; flex-direction: column; gap: 12px; }
+.project-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.project-card-heading strong { font-size: 16px; }
+.project-card p { margin: 0; color: var(--muted, #8b93a5); line-height: 1.5; }
+.project-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; color: var(--muted, #8b93a5); font-size: 12px; }
+.task-project-select { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; color: var(--muted, #8b93a5); font-size: 13px; }
+.task-project-select select { flex: 1; min-width: 0; border: 1px solid var(--border, #303747); border-radius: 9px; padding: 9px 12px; background: var(--surface, #171c27); color: inherit; }
+.projects-page form.settings-card input, .projects-page form.settings-card textarea { width: 100%; margin: 8px 0; }
+@media (max-width: 640px) {
+  .project-grid { grid-template-columns: 1fr; }
+  .project-meta { flex-direction: column; }
+}
