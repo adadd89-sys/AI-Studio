@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity, Bot, BrainCircuit, Check, ChevronDown, ChevronRight,
   CircleHelp, Code2, Command, FolderKanban, GitBranch, LayoutDashboard,
@@ -231,7 +231,10 @@ function readTeamSettings() {
 function App() {
   const [active, setActive] = useState('Обзор');
   const [task, setTask] = useState('');
-  const [tasks, setTasks] = useState([]);
+  const [tasks, setTasks] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ai-studio-tasks') || '[]').slice(0, 100); } catch { return []; }
+  });
+  const pollingJobs = useRef(new Set());
   const [showAll, setShowAll] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [taskError, setTaskError] = useState('');
@@ -256,6 +259,54 @@ function App() {
   useEffect(() => {
     localStorage.setItem('ai-studio-team-settings', JSON.stringify(teamSettings));
   }, [teamSettings]);
+
+  useEffect(() => {
+    localStorage.setItem('ai-studio-tasks', JSON.stringify(tasks.slice(0, 100)));
+  }, [tasks]);
+
+  useEffect(() => {
+    if (authState !== 'authenticated') return;
+    let cancelled = false;
+    async function refreshPendingTasks() {
+      const pending = tasks.filter(item => item.jobId && ['queued', 'running'].includes(item.state));
+      for (const item of pending) {
+        if (cancelled || pollingJobs.current.has(item.jobId)) continue;
+        pollingJobs.current.add(item.jobId);
+        try {
+          const response = await fetch('/api/execute/' + encodeURIComponent(item.jobId));
+          const statusData = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(statusData.error || 'Не удалось восстановить статус задачи.');
+          if (cancelled) return;
+          if (statusData.status === 'complete') {
+            const data = statusData.output?.data || null;
+            const error = statusData.output?.httpStatus >= 400 || data?.error
+              ? (data?.error || 'Команда ИИ завершилась с ошибкой.') : null;
+            setTasks(current => current.map(task => task.jobId === item.jobId ? {
+              ...task, state: error ? 'failed' : 'complete',
+              status: error ? 'Ошибка выполнения' : data?.branch ? 'Код подготовлен' : 'Задача завершена',
+              result: error ? null : data, error
+            } : task));
+          } else if (['errored', 'terminated'].includes(statusData.status)) {
+            const message = statusData.error?.message || 'Асинхронная задача завершилась с ошибкой.';
+            setTasks(current => current.map(task => task.jobId === item.jobId ? { ...task, state: 'failed', status: 'Ошибка выполнения', error: message } : task));
+          } else {
+            const nextState = statusData.status === 'queued' ? 'queued' : 'running';
+            const nextLabel = nextState === 'queued' ? 'В очереди' : 'Выполняется';
+            if (item.state !== nextState || item.status !== nextLabel) {
+              setTasks(current => current.map(task => task.jobId === item.jobId ? { ...task, state: nextState, status: nextLabel } : task));
+            }
+          }
+        } catch (error) {
+          if (!cancelled) setTasks(current => current.map(task => task.jobId === item.jobId ? { ...task, lastStatusError: error.message } : task));
+        } finally {
+          pollingJobs.current.delete(item.jobId);
+        }
+      }
+    }
+    refreshPendingTasks();
+    const timer = setInterval(refreshPendingTasks, 4000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [authState, tasks]);
 
   useEffect(() => {
     localStorage.setItem('ai-studio-usage-events', JSON.stringify(usageEvents.slice(0, 300)));
@@ -349,6 +400,12 @@ function App() {
       if (!response.ok) throw new Error(started.error || 'Не удалось запустить задачу.');
       if (!started.jobId) throw new Error('Сервер не вернул идентификатор задачи.');
 
+      const jobRecord = {
+        id: started.jobId, jobId: started.jobId, title: value,
+        status: 'В очереди', state: 'queued', time: 'Только что',
+        createdAt: new Date().toISOString(), teamSettings
+      };
+      setTasks(current => [jobRecord, ...current.filter(item => item.jobId !== started.jobId)].slice(0, 100));
       let data = null;
       let completed = false;
       for (let attempt = 0; attempt < 300; attempt++) {
@@ -359,15 +416,17 @@ function App() {
         if (statusData.status === 'complete') {
           data = statusData.output?.data || null;
           if (!data) throw new Error('Workflow завершился без результата выполнения.');
-          if (statusData.output?.httpStatus >= 400 || data.error) {
-            throw new Error(data.error || 'Команда ИИ не смогла выполнить задачу.');
-          }
+          if (statusData.output?.httpStatus >= 400 || data.error) throw new Error(data.error || 'Команда ИИ не смогла выполнить задачу.');
           completed = true;
           break;
         }
         if (statusData.status === 'errored' || statusData.status === 'terminated') {
           throw new Error(statusData.error?.message || 'Асинхронная задача завершилась с ошибкой.');
         }
+        const nextState = statusData.status === 'queued' ? 'queued' : 'running';
+        setTasks(current => current.map(item => item.jobId === started.jobId ? {
+          ...item, state: nextState, status: nextState === 'queued' ? 'В очереди' : 'Выполняется'
+        } : item));
         const activeNames = [];
         if (teamSettings.agents.gemini) activeNames.push('Gemini');
         if (teamSettings.agents.qwen) activeNames.push('Qwen');
@@ -379,7 +438,8 @@ function App() {
           : activeNames.join(', ') + ' выполняют задачу. Это может занять несколько минут…');
       }
       if (!completed) {
-        throw new Error('Задача всё ещё выполняется в фоне. Идентификатор: ' + started.jobId + '. Обновите страницу позже и проверьте статус.');
+        setReviewStatus('Задача продолжает выполняться в фоне. Она сохранена в разделе «Процессы» и будет восстановлена при следующем открытии.');
+        throw new Error('Задача продолжает выполняться в фоне. Её можно отслеживать в разделе «Процессы».');
       }
       const actualAgents = Array.isArray(data.agentsUsed) ? data.agentsUsed : [];
       setGeminiCallStatus(actualAgents.includes('gemini') ? true : null);
@@ -405,16 +465,19 @@ function App() {
       setReviewStatus(data.branch
         ? 'Проверка пройдена. ' + developerName + ' подготовил ' + count + ' файл(ов) в отдельной GitHub-ветке.'
         : 'Анализ завершён. Изменения файлов не потребовались.');
-      setTasks(current => [{
-        id: Date.now(),
-        title: value,
-        status: data.branch ? 'Код подготовлен' : 'План готов',
-        time: 'Только что'
-      }, ...current]);
+      setTasks(current => current.map(item => item.jobId === started.jobId ? {
+        ...item, state: 'complete', status: data.branch ? 'Код подготовлен' : 'Задача завершена',
+        result: data, error: null
+      } : item));
       setTask('');
       setActive('Процессы');
     } catch (error) {
       setGeminiCallStatus(null);
+      setTasks(current => current.map(item => item.jobId && item.state !== 'complete' && item.state !== 'failed' && item.title === value && item.createdAt
+        ? { ...item, state: error.message?.includes('продолжает выполняться') ? 'running' : 'failed',
+            status: error.message?.includes('продолжает выполняться') ? 'Выполняется' : 'Ошибка выполнения',
+            error: error.message || 'Не удалось связаться с командой ИИ.' }
+        : item));
       setTaskError(error.message || 'Не удалось связаться с командой ИИ.');
     } finally {
       setIsSubmitting(false);
@@ -468,7 +531,20 @@ function App() {
         </header>
 
         <div className="page-content">
-          {active === 'Код и файлы' ? <CodeWorkspace /> : active === 'Настройки' ? <section className="settings-page">
+          {active === 'Процессы' ? <section className="processes-page">
+            <div className="section-heading"><div><div className="eyebrow">ИСТОРИЯ И ВЫПОЛНЕНИЕ</div><h2>Задачи и процессы</h2></div><button className="subtle-button" onClick={() => setActive('Обзор')}>Новая задача <Plus size={15}/></button></div>
+            {tasks.length === 0 ? <div className="settings-card"><strong>История пока пуста</strong><p className="settings-note">Запущенные задачи будут автоматически сохраняться на этом устройстве. Если закрыть Telegram, после возвращения AI Studio восстановит проверку их статусов.</p></div> :
+              <div className="process-list">{tasks.map(item => <article className="process-card" key={item.id}>
+                <div className="process-card-heading"><div><strong>{item.title}</strong><small>{item.createdAt ? new Date(item.createdAt).toLocaleString('ru-RU') : item.time}</small></div>
+                  <span className={'process-state ' + (item.state === 'complete' ? 'success' : item.state === 'failed' ? 'error' : 'pending')}>{item.status}</span>
+                </div>
+                {item.error && <p className="process-error">{item.error}</p>}
+                {item.result?.summary && <p className="process-summary">{item.result.summary}</p>}
+                {item.result?.branch && <div className="process-links"><a href={'https://github.com/adadd89-sys/AI-Studio/tree/' + item.result.branch} target="_blank" rel="noreferrer">Открыть ветку GitHub ↗</a><a href={'https://github.com/adadd89-sys/AI-Studio/compare/main...' + item.result.branch} target="_blank" rel="noreferrer">Сравнить изменения ↗</a></div>}
+                {item.jobId && ['queued','running'].includes(item.state) && <small className="process-hint">ID: {item.jobId} · Статус обновляется автоматически</small>}
+              </article>)}</div>}
+            <p className="settings-note">История хранится локально в браузере Telegram на этом устройстве. Очистка данных приложения или переход на другое устройство не переносит эту историю.</p>
+          </section> : active === 'Код и файлы' ? <CodeWorkspace /> : active === 'Настройки' ? <section className="settings-page">
             <div className="section-heading"><div><div className="eyebrow">УПРАВЛЕНИЕ КОМАНДОЙ</div><h2>Настройки AI Studio</h2></div><Gauge size={22}/></div>
             <div className="settings-card"><div className="settings-title"><div><strong>Интенсивность работы</strong><span>Влияет на длину ответов и глубину проверки. Число вызовов зависит от включённых агентов.</span></div><b>{teamSettings.intensity}%</b></div>
               <input className="intensity-slider" type="range" min="0" max="100" step="5" value={teamSettings.intensity} onChange={event => updateTeamSetting('intensity', Number(event.target.value))} disabled={teamSettings.mode === 'max'}/>
