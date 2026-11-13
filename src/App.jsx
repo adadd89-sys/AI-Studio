@@ -258,6 +258,7 @@ function App() {
   const [executionResult, setExecutionResult] = useState(null);
   const [reviewStatus, setReviewStatus] = useState('');
   const [teamSettings, setTeamSettings] = useState(readTeamSettings);
+  const [settingsNotice, setSettingsNotice] = useState('');
   const [usageEvents, setUsageEvents] = useState(() => {
     try { return JSON.parse(localStorage.getItem('ai-studio-usage-events') || '[]'); } catch { return []; }
   });
@@ -374,7 +375,15 @@ function App() {
   }
 
   function toggleAgent(key, enabled) {
-    setTeamSettings(current => ({ ...current, agents: { ...current.agents, [key]: enabled } }));
+    setTeamSettings(current => {
+      const agents = { ...current.agents, [key]: enabled };
+      if (!agents.qwen && !agents.north) {
+        setSettingsNotice('Нельзя отключить обоих разработчиков. Оставьте включённым Qwen или North.');
+        return current;
+      }
+      setSettingsNotice('');
+      return { ...current, agents };
+    });
   }
 
   useEffect(() => {
@@ -706,11 +715,13 @@ function App() {
             <div className="settings-card"><div className="settings-title"><div><strong>Интенсивность работы</strong><span>Влияет на длину ответов и глубину проверки. Число вызовов зависит от включённых агентов.</span></div><b>{teamSettings.intensity}%</b></div>
               <input className="intensity-slider" type="range" min="0" max="100" step="5" value={teamSettings.intensity} onChange={event => updateTeamSetting('intensity', Number(event.target.value))} disabled={teamSettings.mode === 'max'}/>
               <div className="slider-labels"><span>Экономно</span><span>Сбалансированно</span><span>Максимум</span></div>
+              <p className="settings-note">Интенсивность меняет размер ответов и глубину проверки, а не отключает базовые вызовы. Даже на 0% выбранный руководитель (Gemini, если включён) и один разработчик выполняют свои обязательные этапы.</p>
               <div className="mode-options"><button className={teamSettings.mode === 'chat' ? 'mode-option selected' : 'mode-option'} onClick={() => updateTeamSetting('mode','chat')}><MessageCircle size={16}/><strong>Общение</strong><span>Короткие ответы без GitHub и разработки</span></button><button className={teamSettings.mode === 'normal' ? 'mode-option selected' : 'mode-option'} onClick={() => updateTeamSetting('mode','normal')}><Gauge size={16}/><strong>Обычная работа</strong><span>План, выполнение и нужные проверки</span></button><button className={teamSettings.mode === 'max' ? 'mode-option selected' : 'mode-option'} onClick={() => { updateTeamSetting('mode','max'); updateTeamSetting('intensity',100); }}><Zap size={16}/><strong>Максимальная нагрузка</strong><span>100% интенсивность и глубокая проверка. Участвуют только включённые агенты</span></button></div>
             </div>
             <div className="settings-card"><div className="settings-title"><div><strong>Участие агентов</strong><span>Отключённый агент не должен получать запросы</span></div></div>
               <div className="agent-toggle-list">{agents.map(agent => <label className="agent-toggle" key={agent.key}><span className={'agent-avatar ' + agent.tone}>{agent.initials}</span><span><strong>{agent.name}</strong><small>{agent.model}</small></span><input type="checkbox" checked={Boolean(teamSettings.agents[agent.key])} onChange={event => toggleAgent(agent.key,event.target.checked)}/></label>)}</div>
-              <p className="settings-note">Cohere North Mini Code включается только после добавления OPENROUTER_API_KEY в секреты Cloudflare. Сам ключ сюда вводить не нужно.</p>
+              <p className="settings-note">Нужен хотя бы один разработчик: Qwen или North. Если Qwen выключен, North становится основным разработчиком. При интенсивности от 50% включаются проверки выбранными Gemma и/или North; от 80% команда может сделать одну попытку исправления после замечаний ревью. North требует OPENROUTER_API_KEY в секретах Cloudflare.</p>
+              {settingsNotice && <p className="task-error" role="alert">{settingsNotice}</p>}
             </div>
             <div className="settings-save-note"><Check size={15}/> Настройки сохраняются на этом устройстве и применяются к следующим задачам.</div>
           </section> : active === 'Расход ресурсов' ? <section className="usage-page">
