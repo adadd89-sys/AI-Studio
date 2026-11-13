@@ -931,7 +931,7 @@ function App() {
       <main className={active === 'Чат с ИИ' ? "main-area chat-active" : "main-area"}>
         <header className="topbar">
           <div className="breadcrumbs"><span>AI Studio</span><ChevronRight size={14} /><strong>{title}</strong></div>
-          <div className="topbar-right"><span className="date-label">{greeting}</span><button className={"ambient-toggle " + (ambientEnabled ? "is-on" : "")} type="button" aria-pressed={ambientEnabled} aria-label={ambientEnabled ? "Выключить космический фон" : "Включить космический фон"} title={ambientEnabled ? "Выключить космический фон" : "Включить космический фон"} onClick={() => setAmbientEnabled(value => !value)}>{ambientEnabled ? <Volume2 size={16}/> : <VolumeX size={16}/>}<span>{ambientEnabled ? "Звук включён" : "Звук"}</span></button><button className="icon-button" aria-label="Помощь"><CircleHelp size={17} /></button><div className="top-avatar">Р</div></div>
+          <div className="topbar-right"><span className="date-label">{greeting}</span><button className={"ambient-toggle " + (ambientEnabled ? "is-on" : "")} type="button" aria-pressed={ambientEnabled} aria-label={ambientEnabled ? "Выключить космический фон" : "Включить космический фон"} title={ambientEnabled ? "Выключить космический фон" : "Включить космический фон"} onClick={() => setAmbientEnabled(value => !value)}>{ambientEnabled ? <Volume2 size={16}/> : <VolumeX size={16}/>}<span>{ambientEnabled ? "Звук включён" : "Звук"}</span></button><button className="icon-button" aria-label="Помощь"><CircleHelp size={17} /></button><div className="top-avatar">{sessionRole === 'owner' ? 'Р' : 'У'}</div></div>
         </header>
 
         <div className={active === 'Чат с ИИ' ? "page-content chat-content" : "page-content"}>
@@ -953,7 +953,7 @@ function App() {
             </div>
           </section> : null}
           {active === 'Чат с ИИ' ? <section className="task-panel chat-mode chat-page">
-            <div className="chat-page-heading"><div><div className="eyebrow"><MessageCircle size={14}/> ЛИЧНЫЙ ДИАЛОГ</div><h1>Чат с ИИ</h1><p>Общение, анализ проекта и работа с GitHub через Gemini</p></div><div className="chat-agent-indicator"><span className="working-pulse"/>{teamSettings.agents.gemini ? 'Gemini · основной агент' : teamSettings.agents.qwen ? 'Qwen · основной агент' : 'Активный агент'}</div></div>
+            <div className="chat-page-heading"><div><div className="eyebrow"><MessageCircle size={14}/> ЛИЧНЫЙ ДИАЛОГ</div><h1>Чат с ИИ</h1><p>{sessionRole === 'owner' ? 'Общение, анализ проекта и работа с GitHub через Gemini' : 'Личный диалог с командой ИИ'}</p></div><div className="chat-agent-indicator"><span className="working-pulse"/>{teamSettings.agents.gemini ? 'Gemini · основной агент' : teamSettings.agents.qwen ? 'Qwen · основной агент' : 'Активный агент'}</div></div>
             <div className="chat-thread" ref={chatThreadRef} aria-live="polite">
               {chatMessages.length === 0 && <div className="chat-empty"><div className="chat-empty-orb"><BrainCircuit size={25}/></div><strong>С чего начнём?</strong><span>Напишите сообщение — ИИ ответит прямо здесь.</span></div>}
               {chatMessages.map((item,index) => <div key={index} className={'chat-message ' + item.role}><span>{item.role === 'user' ? 'Вы' : item.agent || 'AI Studio'}</span><p>{item.content || (item.role === 'assistant' ? <span className="typing-dots"><i/><i/><i/></span> : '')}</p></div>)}
