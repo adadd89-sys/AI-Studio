@@ -698,9 +698,9 @@ function App() {
               {chatMessages.map((item,index) => <div key={index} className={'chat-message ' + item.role}><span>{item.role === 'user' ? 'Вы' : item.agent || 'AI Studio'}</span><p>{item.content || (item.role === 'assistant' ? <span className="typing-dots"><i/><i/><i/></span> : '')}</p></div>)}
               {(chatLoading || chatStatus) && <div className={'chat-working ' + (chatLoading ? '' : chatStatus.startsWith('Не удалось') ? 'error' : 'complete')} role="status"><span className={chatLoading ? 'working-pulse' : chatStatus.startsWith('Не удалось') ? 'working-error' : 'working-check'}>{chatLoading ? '' : chatStatus.startsWith('Не удалось') ? '!' : '✓'}</span><span>{chatStatus || 'Модель готовит ответ…'}</span></div>}
             </div>
-            <form onSubmit={submitTask} className="chat-composer">
-              <textarea value={task} onChange={e => setTask(e.target.value)} placeholder="Напишите сообщение…" rows={3}/>
-              <div className="composer-footer"><div className="composer-hint"><Sparkles size={14}/> Один агент отвечает без запуска задач</div><button className="primary-button" type="submit" disabled={!task.trim() || chatLoading}>{chatLoading ? 'Отвечаем…' : 'Отправить'} <Send size={15}/></button></div>
+            <form onSubmit={submitTask} className="chat-composer chatgpt-composer">
+              <textarea value={task} onChange={e => setTask(e.target.value)} placeholder="Напишите сообщение…" rows={1}/>
+              <button className="chat-send-button" type="submit" aria-label="Отправить сообщение" disabled={!task.trim() || chatLoading}>{chatLoading ? <span className="chat-send-spinner"/> : <Send size={17}/>}</button>
             </form>
             {taskError && <div className="task-error" role="alert">{taskError}</div>}
           </section> : active === 'Проекты' ? <section className="projects-page">
