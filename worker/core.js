@@ -7,7 +7,7 @@ const GEMINI_AGENT_LABELS = { gemini: "Gemini 4 Hydrogen", gemini38: "Gemini 3.8
 
 export function extractCohereResponseText(payload) {
   const message = payload?.choices?.[0]?.message;
-  const candidates = [message?.content,payload?.choices?.[0]?.text,message?.reasoning_content,message?.reasoning,payload?.output_text,payload?.response,payload?.generated_text];
+  const candidates = [message?.content,message?.tool_calls?.[0]?.function?.arguments,message?.function_call?.arguments,payload?.choices?.[0]?.text,message?.reasoning_content,message?.reasoning,payload?.output_text,payload?.response,payload?.generated_text];
   for (const candidate of candidates) {
     if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
     if (Array.isArray(candidate)) {
