@@ -391,6 +391,7 @@ function App() {
     setReviewStatus(teamSettings.agents.gemini ? 'Gemini анализирует задачу и готовит технический план…' : 'Разработчик готовит изменения по базовому плану…');
     setGeminiCallStatus(null);
     let submittedJobId = null;
+    let workflowFailed = false;
     try {
       const response = await fetch('/api/execute', {
         method: 'POST',
@@ -410,7 +411,6 @@ function App() {
       setTasks(current => [jobRecord, ...current.filter(item => item.jobId !== started.jobId)].slice(0, 100));
       let data = null;
       let completed = false;
-      let workflowFailed = false;
       for (let attempt = 0; attempt < 300; attempt++) {
         await new Promise(resolve => setTimeout(resolve, 2000));
         const statusResponse = await fetch('/api/execute/' + encodeURIComponent(started.jobId));
