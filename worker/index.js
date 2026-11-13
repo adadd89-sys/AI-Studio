@@ -1,4 +1,4 @@
-import worker, { getSessionIdentity, hasAuthProvider, isValidSession, normalizeWorkflowTeamSettings } from "./core.js";
+import worker, { getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isValidSession, normalizeWorkflowTeamSettings } from "./core.js";
 import { AIStudioWorkflow } from "./workflow.js";
 
 export { AIStudioWorkflow };
@@ -210,7 +210,7 @@ export default {
             ...(state === "failed" && errorMessage ? { error: errorMessage } : {})
           };
           // KV writes are billable; polling must not rewrite an unchanged task snapshot.
-          if (JSON.stringify(updated) !== JSON.stringify(taskRecord)) {
+          if (hasTaskSnapshotChanged(taskRecord, updated)) {
             await env.TASKS.put(taskKey(ownerId, jobId), JSON.stringify(updated), { expirationTtl: TASK_TTL_SECONDS });
           }
         }
