@@ -237,6 +237,8 @@ function App() {
   const pollingJobs = useRef(new Set());
   const [projects, setProjects] = useState([]);
   const [selectedProjectId, setSelectedProjectId] = useState('');
+  const [detailProjectId, setDetailProjectId] = useState('');
+  const [projectDraft, setProjectDraft] = useState({ name: '', description: '', status: 'active' });
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDescription, setNewProjectDescription] = useState('');
   const [projectError, setProjectError] = useState('');
@@ -276,7 +278,10 @@ function App() {
     fetch('/api/projects').then(async response => {
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'Не удалось загрузить проекты.');
-      if (!cancelled && Array.isArray(data.projects)) setProjects(data.projects);
+      if (!cancelled && Array.isArray(data.projects)) {
+        setProjects(data.projects);
+        setProjectDraft(current => current.name ? current : { name: '', description: '', status: 'active' });
+      }
     }).catch(error => { if (!cancelled) setProjectError(error.message); });
     return () => { cancelled = true; };
   }, [authState]);
@@ -435,6 +440,28 @@ function App() {
       setNewProjectDescription('');
     } catch (error) {
       setProjectError(error.message || 'Не удалось создать проект.');
+    } finally {
+      setProjectBusy(false);
+    }
+  }
+
+  async function updateProject(event) {
+    event.preventDefault();
+    if (!detailProjectId || projectBusy) return;
+    setProjectBusy(true);
+    setProjectError('');
+    try {
+      const response = await fetch('/api/projects/' + encodeURIComponent(detailProjectId), {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(projectDraft)
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Не удалось обновить проект.');
+      setProjects(current => current.map(item => item.id === data.project.id ? data.project : item));
+      setProjectDraft({ name: data.project.name, description: data.project.description || '', status: data.project.status });
+    } catch (error) {
+      setProjectError(error.message || 'Не удалось обновить проект.');
     } finally {
       setProjectBusy(false);
     }
@@ -614,20 +641,53 @@ function App() {
 
         <div className="page-content">
           {active === 'Проекты' ? <section className="projects-page">
-            <div className="section-heading"><div><div className="eyebrow">ОБЩИЕ ДАННЫЕ · TELEGRAM CLOUD</div><h2>Мои проекты</h2></div><FolderKanban size={22}/></div>
-            <form className="settings-card" onSubmit={createProject}>
-              <div className="settings-title"><div><strong>Создать проект</strong><span>Проекты сохраняются на сервере и доступны с других устройств через Telegram.</span></div></div>
-              <input value={newProjectName} onChange={event => setNewProjectName(event.target.value)} placeholder="Название проекта" maxLength={100} required />
-              <textarea value={newProjectDescription} onChange={event => setNewProjectDescription(event.target.value)} placeholder="Краткое описание (необязательно)" rows={2} maxLength={1000} />
-              <button className="primary-button" type="submit" disabled={!newProjectName.trim() || projectBusy}>{projectBusy ? 'Сохраняем…' : 'Создать проект'} <Plus size={15}/></button>
-              {projectError && <div className="task-error" role="alert">{projectError}</div>}
-            </form>
-            {projects.length ? <div className="project-grid">{projects.map(project => <article className="settings-card project-card" key={project.id}>
-              <div className="project-card-heading"><strong>{project.name}</strong><span className={'process-state ' + (project.status === 'completed' ? 'success' : 'pending')}>{project.status === 'completed' ? 'Завершён' : project.status === 'paused' ? 'На паузе' : 'Активен'}</span></div>
-              {project.description && <p>{project.description}</p>}
-              <div className="project-meta"><span>Задач: {project.taskCount || 0}</span><span>Обновлён {new Date(project.updatedAt).toLocaleDateString('ru-RU')}</span></div>
-              <button className="subtle-button" type="button" onClick={() => { setSelectedProjectId(project.id); setActive('Обзор'); }}>Создать задачу в проекте <Plus size={14}/></button>
-            </article>)}</div> : <div className="settings-card"><strong>Проектов пока нет</strong><p className="settings-note">Создайте первый проект. Затем можно привязывать к нему задачи и вести общую историю.</p></div>}
+            <div className="section-heading"><div><div className="eyebrow">ОБЩИЕ ДАННЫЕ · TELEGRAM CLOUD</div><h2>{detailProjectId ? 'Карточка проекта' : 'Мои проекты'}</h2></div><FolderKanban size={22}/></div>
+            {detailProjectId ? (() => {
+              const project = projects.find(item => item.id === detailProjectId);
+              const projectTasks = tasks.filter(item => item.projectId === detailProjectId).sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+              if (!project) return <div className="settings-card"><p className="settings-note">Проект не найден или ещё загружается.</p><button className="subtle-button" onClick={() => setDetailProjectId('')}>К списку проектов</button></div>;
+              return <div className="project-detail">
+                <button className="subtle-button project-back" type="button" onClick={() => { setDetailProjectId(''); setProjectError(''); }}>‹ Все проекты</button>
+                <div className="project-detail-overview settings-card">
+                  <div className="project-card-heading"><div><div className="eyebrow">PROJECT · {project.id.slice(0, 8)}</div><h3>{project.name}</h3></div><span className={'process-state ' + (project.status === 'completed' ? 'success' : 'pending')}>{project.status === 'completed' ? 'Завершён' : project.status === 'paused' ? 'На паузе' : 'Активен'}</span></div>
+                  <div className="project-detail-stats"><div><strong>{project.taskCount || 0}</strong><span>Всего задач</span></div><div><strong>{projectTasks.filter(item => item.state === 'complete').length}</strong><span>Завершено</span></div><div><strong>{projectTasks.filter(item => item.state === 'failed').length}</strong><span>С ошибками</span></div></div>
+                  <p className="settings-note">Создан {new Date(project.createdAt).toLocaleString('ru-RU')} · Обновлён {new Date(project.updatedAt).toLocaleString('ru-RU')}</p>
+                </div>
+                <form className="settings-card project-edit-form" onSubmit={updateProject}>
+                  <div className="settings-title"><div><strong>Настройки проекта</strong><span>Название, описание и жизненный цикл проекта.</span></div></div>
+                  <label>Название<input value={projectDraft.name} onChange={event => setProjectDraft(current => ({ ...current, name: event.target.value }))} maxLength={100} required /></label>
+                  <label>Описание<textarea value={projectDraft.description} onChange={event => setProjectDraft(current => ({ ...current, description: event.target.value }))} rows={3} maxLength={1000}/></label>
+                  <label>Статус<select value={projectDraft.status} onChange={event => setProjectDraft(current => ({ ...current, status: event.target.value }))}><option value="active">Активен</option><option value="paused">На паузе</option><option value="completed">Завершён</option></select></label>
+                  <button className="primary-button" type="submit" disabled={projectBusy || !projectDraft.name.trim()}>{projectBusy ? 'Сохраняем…' : 'Сохранить изменения'} <Save size={14}/></button>
+                  {projectError && <div className="task-error" role="alert">{projectError}</div>}
+                </form>
+                <div className="project-activity settings-card">
+                  <div className="settings-title"><div><strong>Задачи и история работы</strong><span>Все процессы, привязанные к этому проекту.</span></div><span>{projectTasks.length} записей</span></div>
+                  {projectTasks.length ? <div className="process-list">{projectTasks.map(item => <article className="process-card" key={item.jobId || item.id}>
+                    <div className="process-card-heading"><div><strong>{item.title}</strong><small>{item.createdAt ? new Date(item.createdAt).toLocaleString('ru-RU') : item.time}</small></div><span className={'process-state ' + (item.state === 'complete' ? 'success' : item.state === 'failed' ? 'error' : 'pending')}>{item.status || 'Статус неизвестен'}</span></div>
+                    {item.error && <p className="process-error">{item.error}</p>}
+                    {item.result?.summary && <p className="process-summary">{item.result.summary}</p>}
+                    {item.result?.branch && <div className="process-links"><a href={'https://github.com/adadd89-sys/AI-Studio/tree/' + item.result.branch} target="_blank" rel="noreferrer">Ветка с результатом ↗</a><a href={'https://github.com/adadd89-sys/AI-Studio/compare/main...' + item.result.branch} target="_blank" rel="noreferrer">Сравнить изменения ↗</a></div>}
+                    {item.jobId && <small className="process-hint">ID задачи: {item.jobId}</small>}
+                  </article>)}</div> : <p className="settings-note">Пока нет задач. Создайте первую задачу из этого проекта — её результат появится здесь.</p>}
+                  <button className="primary-button" type="button" onClick={() => { setSelectedProjectId(project.id); setActive('Обзор'); }}>Создать задачу в проекте <Plus size={14}/></button>
+                </div>
+              </div>;
+            })() : <>
+              <form className="settings-card" onSubmit={createProject}>
+                <div className="settings-title"><div><strong>Создать проект</strong><span>Проекты сохраняются на сервере и доступны с других устройств через Telegram.</span></div></div>
+                <input value={newProjectName} onChange={event => setNewProjectName(event.target.value)} placeholder="Название проекта" maxLength={100} required />
+                <textarea value={newProjectDescription} onChange={event => setNewProjectDescription(event.target.value)} placeholder="Краткое описание (необязательно)" rows={2} maxLength={1000} />
+                <button className="primary-button" type="submit" disabled={!newProjectName.trim() || projectBusy}>{projectBusy ? 'Сохраняем…' : 'Создать проект'} <Plus size={15}/></button>
+                {projectError && <div className="task-error" role="alert">{projectError}</div>}
+              </form>
+              {projects.length ? <div className="project-grid">{projects.map(project => <article className="settings-card project-card" key={project.id}>
+                <div className="project-card-heading"><strong>{project.name}</strong><span className={'process-state ' + (project.status === 'completed' ? 'success' : 'pending')}>{project.status === 'completed' ? 'Завершён' : project.status === 'paused' ? 'На паузе' : 'Активен'}</span></div>
+                {project.description && <p>{project.description}</p>}
+                <div className="project-meta"><span>Задач: {project.taskCount || 0}</span><span>Обновлён {new Date(project.updatedAt).toLocaleDateString('ru-RU')}</span></div>
+                <div className="project-card-actions"><button className="subtle-button" type="button" onClick={() => { setDetailProjectId(project.id); setProjectDraft({ name: project.name, description: project.description || '', status: project.status || 'active' }); setProjectError(''); }}>Открыть проект <ChevronRight size={14}/></button><button className="subtle-button" type="button" onClick={() => { setSelectedProjectId(project.id); setActive('Обзор'); }}>Новая задача <Plus size={14}/></button></div>
+              </article>)}</div> : <div className="settings-card"><strong>Проектов пока нет</strong><p className="settings-note">Создайте первый проект. Затем можно привязывать к нему задачи и вести общую историю.</p></div>}
+            </>}
           </section> : active === 'Процессы' ? <section className="processes-page">
             <div className="section-heading"><div><div className="eyebrow">ИСТОРИЯ И ВЫПОЛНЕНИЕ</div><h2>Задачи и процессы</h2></div><button className="subtle-button" onClick={() => setActive('Обзор')}>Новая задача <Plus size={15}/></button></div>
             {tasks.length === 0 ? <div className="settings-card"><strong>История пока пуста</strong><p className="settings-note">Запущенные задачи будут автоматически сохраняться на этом устройстве. Если закрыть Telegram, после возвращения AI Studio восстановит проверку их статусов.</p></div> :
@@ -640,7 +700,7 @@ function App() {
                 {item.result?.branch && <div className="process-links"><a href={'https://github.com/adadd89-sys/AI-Studio/tree/' + item.result.branch} target="_blank" rel="noreferrer">Открыть ветку GitHub ↗</a><a href={'https://github.com/adadd89-sys/AI-Studio/compare/main...' + item.result.branch} target="_blank" rel="noreferrer">Сравнить изменения ↗</a></div>}
                 {item.jobId && ['queued','running'].includes(item.state) && <small className="process-hint">ID: {item.jobId} · Статус обновляется автоматически</small>}
               </article>)}</div>}
-            <p className="settings-note">История хранится локально в браузере Telegram на этом устройстве. Очистка данных приложения или переход на другое устройство не переносит эту историю.</p>
+            <p className="settings-note">История синхронизируется с сервером для Telegram-аккаунта; локальная копия помогает сохранить доступ при временной недоступности сети.</p>
           </section> : active === 'Код и файлы' ? <CodeWorkspace /> : active === 'Настройки' ? <section className="settings-page">
             <div className="section-heading"><div><div className="eyebrow">УПРАВЛЕНИЕ КОМАНДОЙ</div><h2>Настройки AI Studio</h2></div><Gauge size={22}/></div>
             <div className="settings-card"><div className="settings-title"><div><strong>Интенсивность работы</strong><span>Влияет на длину ответов и глубину проверки. Число вызовов зависит от включённых агентов.</span></div><b>{teamSettings.intensity}%</b></div>
