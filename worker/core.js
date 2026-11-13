@@ -1193,7 +1193,10 @@ export default {
         if (teamSettings.agents.qwen) availableDevelopers.push("qwen");
         if (teamSettings.agents.north) availableDevelopers.push("north");
         const plannedAssignments = Array.isArray(plan.assignments)
-          ? plan.assignments.filter(item => item && availableDevelopers.includes(item.agent) && typeof item.task === "string" && item.task.trim()).slice(0, availableDevelopers.length)
+          ? plan.assignments.filter((item, index, all) => item && availableDevelopers.includes(item.agent) &&
+              all.findIndex(candidate => candidate?.agent === item.agent) === index &&
+              typeof item.task === "string" && item.task.trim() && Array.isArray(item.allowedPaths) && item.allowedPaths.length)
+              .slice(0, availableDevelopers.length)
           : [];
         const assignments = plannedAssignments.length
           ? plannedAssignments.map(item => ({
@@ -1205,6 +1208,9 @@ export default {
             }))
           : [{ agent: availableDevelopers[0], task, allowedPaths: [] }];
         if (!assignments.length) throw new Error("Gemini не назначил задачу ни одному включённому разработчику.");
+        if (plannedAssignments.length && assignments.some(item => !item.allowedPaths.length)) {
+          throw new Error("Gemini выдал пустой или недопустимый список файлов для одного из исполнителей. Запросите новое распределение задач.");
+        }
         const claimedPaths = new Set();
         for (const assignment of assignments) for (const path of assignment.allowedPaths) {
           if (claimedPaths.has(path)) throw new Error("Gemini назначил один файл нескольким разработчикам: " + path);
