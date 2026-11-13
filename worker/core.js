@@ -798,7 +798,7 @@ export default {
 
     if (url.pathname === "/api/execute" && request.method === "POST") {
       if (!hasAuthProvider(env)) return json({ error: "Авторизация ещё не настроена." }, 503);
-      if (!await isAllowedSession(request, env)) return json({ error: "Требуется вход в AI Studio." }, 401);
+      if (!await isValidSession(request, env.SESSION_SECRET, env.TELEGRAM_OWNER_ID)) return json({ error: "Требуется вход в AI Studio." }, 401);
       if (!hasSameOrigin(request)) return json({ error: "Недопустимый источник запроса." }, 403);
       if (!env.GITHUB_TOKEN) return json({ error: "GitHub не подключён. Проверьте GITHUB_TOKEN." }, 503);
 
