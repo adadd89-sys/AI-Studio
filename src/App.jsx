@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity, Bot, BrainCircuit, Check, ChevronDown, ChevronRight,
-  CircleHelp, Code2, Command, FolderKanban, GitBranch, LayoutDashboard,
+  CircleHelp, Code2, Command, FolderKanban, GitBranch, GitPlus, LayoutDashboard,
   MessageSquare, Plus, Send, Settings2, ShieldCheck, Sparkles, Terminal,
   Users, Workflow, Zap, FileText, Save, RefreshCw, GitCommit, X, Gauge, BarChart3, MessageCircle
 } from 'lucide-react';
