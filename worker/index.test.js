@@ -750,7 +750,8 @@ describe("AI Studio Worker", () => {
       }), env);
       const payload = await response.json();
       assert.equal(response.status, 200);
-      assert.equal(payload.agent, "Gemini 3.6 Flash");
+      assert.equal(payload.agent, "gemini36");
+      assert.equal(payload.agentLabel, "Gemini 3.6 Flash");
       assert.match(requestedUrl, /models\/gemini-3\.6-flash:generateContent/);
     } finally {
       globalThis.fetch = originalFetch;
