@@ -763,7 +763,7 @@ describe("AI Studio Worker", () => {
       const response = await worker.fetch(new Request("https://studio.test/api/execute", {
         method: "POST",
         headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
-        body: JSON.stringify({ task: "Добавь экран настроек" })
+        body: JSON.stringify({ task: "Добавь экран настроек", teamSettings: { agents: { north: true } } })
       }), { ...env, AI: ai, GITHUB_TOKEN: "test-token", GEMINI_MODEL: "gemini-4-hydrogen", OPENROUTER_API_KEY: "test-openrouter" });
       assert.equal(response.status, 200);
       const result = await response.json();
