@@ -115,7 +115,7 @@ describe("AI Studio Worker", () => {
     const identity = await getSessionIdentity(new Request("https://studio.test/", { headers: { cookie } }), env.SESSION_SECRET);
     assert.deepEqual(identity, { telegramUserId: 987654321 });
     const session = await worker.fetch(new Request("https://studio.test/api/session", { headers: { cookie } }), {
-      SESSION_SECRET: env.SESSION_SECRET, TELEGRAM_BOT_TOKEN: botToken
+      SESSION_SECRET: env.SESSION_SECRET, TELEGRAM_BOT_TOKEN: botToken, TELEGRAM_OWNER_ID: "987654321"
     });
     assert.equal((await session.json()).authenticated, true);
   });
@@ -139,7 +139,7 @@ describe("AI Studio Worker", () => {
       method: "POST",
       headers: { "content-type": "application/json", origin: "https://studio.test" },
       body: JSON.stringify({ initData })
-    }), { SESSION_SECRET: env.SESSION_SECRET, TELEGRAM_BOT_TOKEN: botToken });
+    }), { SESSION_SECRET: env.SESSION_SECRET, TELEGRAM_BOT_TOKEN: botToken, TELEGRAM_OWNER_ID: "987654321" });
     assert.equal(response.status, 401);
   });
 
