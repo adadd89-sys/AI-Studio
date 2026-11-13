@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Bot, BrainCircuit, Check, ChevronDown, ChevronRight,
+  Bot, BrainCircuit, Check, ChevronDown, ChevronRight, Volume2, VolumeX,
   CircleHelp, Code2, Command, FolderKanban, GitBranch, LayoutDashboard,
   MessageSquare, Plus, Send, Settings2, ShieldCheck, Sparkles, Terminal,
   Users, Workflow, Zap, FileText, Save, RefreshCw, GitCommit, X, Gauge, BarChart3, MessageCircle
@@ -234,6 +234,7 @@ function readTeamSettings() {
 
 function App() {
   const [active, setActive] = useState('Обзор');
+  const [ambientEnabled, setAmbientEnabled] = useState(false);
   const [task, setTask] = useState('');
   const [tasks, setTasks] = useState(() => {
     try { return JSON.parse(localStorage.getItem('ai-studio-tasks') || '[]').slice(0, 100); } catch { return []; }
@@ -275,6 +276,79 @@ function App() {
   const [chatStatus, setChatStatus] = useState('');
   const [chatGithubResult, setChatGithubResult] = useState(null);
   const chatThreadRef = useRef(null);
+
+  useEffect(() => {
+    if (!ambientEnabled) return undefined;
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) {
+      setAmbientEnabled(false);
+      return undefined;
+    }
+
+    const audio = new AudioContextClass();
+    const master = audio.createGain();
+    master.gain.setValueAtTime(0, audio.currentTime);
+    master.gain.setTargetAtTime(0.2, audio.currentTime, 2.8);
+    master.connect(audio.destination);
+
+    // Soft filtered space-noise bed.
+    const noiseBuffer = audio.createBuffer(1, audio.sampleRate * 3, audio.sampleRate);
+    const noiseData = noiseBuffer.getChannelData(0);
+    let brown = 0;
+    for (let i = 0; i < noiseData.length; i += 1) {
+      brown = (brown + 0.018 * (Math.random() * 2 - 1)) / 1.018;
+      noiseData[i] = brown * 3.2;
+    }
+    const noise = audio.createBufferSource();
+    noise.buffer = noiseBuffer;
+    noise.loop = true;
+    const noiseFilter = audio.createBiquadFilter();
+    noiseFilter.type = 'lowpass';
+    noiseFilter.frequency.value = 360;
+    const noiseGain = audio.createGain();
+    noiseGain.gain.value = 0.13;
+    noise.connect(noiseFilter).connect(noiseGain).connect(master);
+    noise.start();
+
+    // A slow, warm harmonic drone with very subtle upper tones.
+    const pad = audio.createGain();
+    pad.gain.value = 0.7;
+    pad.connect(master);
+    [55, 82.41, 110, 164.81, 220].forEach((frequency, index) => {
+      const oscillator = audio.createOscillator();
+      const voiceGain = audio.createGain();
+      oscillator.type = 'sine';
+      oscillator.frequency.value = frequency;
+      oscillator.detune.value = index % 2 === 0 ? -3 : 3;
+      voiceGain.gain.value = [0.09, 0.055, 0.035, 0.012, 0.006][index];
+      oscillator.connect(voiceGain).connect(pad);
+      oscillator.start();
+    });
+
+    const lfo = audio.createOscillator();
+    const lfoGain = audio.createGain();
+    lfo.frequency.value = 0.045;
+    lfoGain.gain.value = 0.018;
+    lfo.connect(lfoGain).connect(pad.gain);
+    lfo.start();
+
+    audio.resume().catch(() => {});
+    const handleVisibility = () => {
+      if (document.hidden) audio.suspend().catch(() => {});
+      else audio.resume().catch(() => {});
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      const now = audio.currentTime;
+      master.gain.cancelScheduledValues(now);
+      master.gain.setTargetAtTime(0, now, 0.35);
+      window.setTimeout(() => {
+        audio.close().catch(() => {});
+      }, 1400);
+    };
+  }, [ambientEnabled]);
 
   useEffect(() => {
     localStorage.setItem('ai-studio-team-settings', JSON.stringify(teamSettings));
@@ -735,7 +809,7 @@ function App() {
       <main className={active === 'Чат с ИИ' ? "main-area chat-active" : "main-area"}>
         <header className="topbar">
           <div className="breadcrumbs"><span>AI Studio</span><ChevronRight size={14} /><strong>{title}</strong></div>
-          <div className="topbar-right"><span className="date-label">{greeting}</span><button className="icon-button" aria-label="Помощь"><CircleHelp size={17} /></button><div className="top-avatar">Р</div></div>
+          <div className="topbar-right"><span className="date-label">{greeting}</span><button className={"ambient-toggle " + (ambientEnabled ? "is-on" : "")} type="button" aria-pressed={ambientEnabled} aria-label={ambientEnabled ? "Выключить космический фон" : "Включить космический фон"} title={ambientEnabled ? "Выключить космический фон" : "Включить космический фон"} onClick={() => setAmbientEnabled(value => !value)}>{ambientEnabled ? <Volume2 size={16}/> : <VolumeX size={16}/>}<span>{ambientEnabled ? "Звук включён" : "Звук"}</span></button><button className="icon-button" aria-label="Помощь"><CircleHelp size={17} /></button><div className="top-avatar">Р</div></div>
         </header>
 
         <div className={active === 'Чат с ИИ' ? "page-content chat-content" : "page-content"}>
