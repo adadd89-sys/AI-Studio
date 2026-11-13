@@ -5,6 +5,42 @@ const FREE_GEMINI_MODELS = new Set(["gemini-4-hydrogen", "gemini-3.8-flash", "ge
 const GEMINI_AGENT_MODELS = { gemini: "gemini-4-hydrogen", gemini38: "gemini-3.8-flash", gemini36: "gemini-3.6-flash", geminiLite: "gemini-3.5-flash-lite", gemini31Lite: "gemini-3.1-flash-lite" };
 const GEMINI_AGENT_LABELS = { gemini: "Gemini 4 Hydrogen", gemini38: "Gemini 3.8 Flash", gemini36: "Gemini 3.6 Flash", geminiLite: "Gemini 3.5 Flash-Lite", gemini31Lite: "Gemini 3.1 Flash-Lite" };
 
+export function extractCohereResponseText(payload) {
+  const message = payload?.choices?.[0]?.message;
+  const candidates = [message?.content,payload?.choices?.[0]?.text,message?.reasoning_content,message?.reasoning,payload?.output_text,payload?.response,payload?.generated_text];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+    if (Array.isArray(candidate)) {
+      const value = candidate.map(part => typeof part === "string" ? part : typeof part?.text === "string" ? part.text : typeof part?.content === "string" ? part.content : "").join("").trim();
+      if (value) return value;
+    }
+    if (candidate && typeof candidate === "object" && typeof candidate.text === "string" && candidate.text.trim()) return candidate.text.trim();
+  }
+  return "";
+}
+export function parseCohereChangesResponse(payload) {
+  const raw = typeof payload === "string" ? payload : extractCohereResponseText(payload);
+  if (!raw) return null;
+  const cleaned = raw.trim().replace(/^\x60{3}(?:json)?\s*/i, "").replace(/\s*\x60{3}$/i, "").trim();
+  const parse = value => { try { const item=JSON.parse(value); return item && typeof item==="object" && !Array.isArray(item) ? item : null; } catch { return null; } };
+  let parsed=parse(cleaned);
+  if (!parsed) {
+    for (let start=cleaned.indexOf("{"); start>=0 && !parsed; start=cleaned.indexOf("{",start+1)) {
+      let depth=0,inString=false,escaped=false;
+      for(let i=start;i<cleaned.length;i++){
+        const ch=cleaned[i];
+        if(inString){if(escaped)escaped=false;else if(ch==="\\")escaped=true;else if(ch==='"')inString=false;continue;}
+        if(ch==='"')inString=true;else if(ch==="{")depth++;else if(ch==="}" && --depth===0){parsed=parse(cleaned.slice(start,i+1));break;}
+      }
+    }
+  }
+  for(let depth=0;depth<4 && parsed && !Array.isArray(parsed.changes);depth++){
+    const nested=parsed.result||parsed.data||parsed.output||parsed.response;
+    parsed=typeof nested==="string"?parse(nested):nested;
+  }
+  return parsed && Array.isArray(parsed.changes) ? parsed : null;
+}
+
 export function normalizeWorkflowTeamSettings(rawSettings = {}) {
   const agents = rawSettings?.agents && typeof rawSettings.agents === "object" ? rawSettings.agents : {};
   return {
@@ -1267,23 +1303,42 @@ export default {
           return parsed;
         }
 
+
         async function askNorth(assignment, feedback = "") {
           executionStage = feedback ? "north_repair" : "north_implementation";
-          usage.requests++;
           if (!usage.agents.includes("north")) usage.agents.push("north");
-          const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-            method: "POST",
-            headers: { "content-type": "application/json", "authorization": "Bearer " + env.OPENROUTER_API_KEY, "http-referer": "https://ai-studio.sergey-adadd89.workers.dev", "x-title": "AI Studio" },
-            body: JSON.stringify({ model: "cohere/north-mini-code:free", temperature: 0.15, max_tokens: scaledTokenBudget(intensity, 1200, 4096),
-              messages: [{ role: "system", content: developerSystem }, { role: "user", content: "Задача пользователя:\n" + task + "\n\nПлан Gemini:\n" + planText + "\n\n" + contextText + "\n\nТвоё отдельное ТЗ от Gemini:\n" + assignment.task + "\nРазрешённые пути: " + JSON.stringify(assignment.allowedPaths || []) + (feedback ? "\n\nЗамечания ревью:\n" + feedback : "") + "\n\nПодготовь законченные изменения только по своему ТЗ. Ответ только JSON." }] })
-          });
-          if (!response.ok) { const err = await response.text(); throw new Error("OpenRouter North Mini Code: HTTP " + response.status + " — " + err.slice(0, 300)); }
-          const payload = await response.json();
-          const parsed = normalizeQwenPayload(parseJsonObject(modelText(payload)));
-          if (!parsed) throw new Error("Cohere North Mini Code вернула ответ не в формате JSON с массивом changes.");
-          if (parsed.changes.length > 6) throw new Error("North предложила изменить больше 6 файлов.");
-          for (const change of parsed.changes) {
-            if (!change || typeof change.path !== "string" || typeof change.content !== "string" || (Array.isArray(assignment.allowedPaths) && assignment.allowedPaths.length && !assignment.allowedPaths.includes(change.path)) || !validRepoPath(change.path) || !(change.path === "index.html" || change.path.startsWith("src/") || change.path.startsWith("public/") || change.path.startsWith("worker/")) || change.path.split("/").some(part => part.startsWith(".")) || change.path.includes("node_modules") || change.path.includes("dist/") || change.content.length > 250000) throw new Error("North вернула недопустимое изменение файла.");
+          const endpoint = "https://openrouter.ai/api/v1/chat/completions";
+          const headers = { "content-type": "application/json", "authorization": "Bearer " + env.OPENROUTER_API_KEY, "http-referer": "https://ai-studio.sergey-adadd89.workers.dev", "x-title": "AI Studio" };
+          const userInstruction = "Задача пользователя:\n" + task + "\n\nПлан Gemini:\n" + planText + "\n\n" + contextText + "\n\nТвоё отдельное ТЗ от Gemini:\n" + assignment.task + "\nРазрешённые пути: " + JSON.stringify(assignment.allowedPaths || []) + (feedback ? "\n\nЗамечания ревью:\n" + feedback : "");
+          async function requestNorth(instruction) {
+            usage.requests++;
+            return fetch(endpoint, { method:"POST", headers, body:JSON.stringify({
+              model:"cohere/north-mini-code:free", temperature:0.1, max_tokens:scaledTokenBudget(intensity,1800,4096),
+              messages:[
+                {role:"system",content:developerSystem+" Обязательная схема: один JSON-объект с полями summary (строка) и changes (массив объектов path, content, reason). Никакого текста вне JSON."},
+                {role:"user",content:instruction}
+              ]
+            })});
+          }
+          let response=await requestNorth(userInstruction+"\n\nВерни только JSON. Каждый элемент changes обязан содержать path и полное content файла.");
+          if(!response.ok){const err=await response.text();throw new Error("OpenRouter North Mini Code: HTTP "+response.status+" — "+err.slice(0,300));}
+          let payload=await response.json();
+          let parsed=parseCohereChangesResponse(payload);
+          if(!parsed){
+            const raw=extractCohereResponseText(payload);
+            const diagnostic=raw.replace(/\s+/g," ").slice(0,350)||"пустой ответ";
+            response=await requestNorth(userInstruction+"\n\nПРЕДЫДУЩИЙ ОТВЕТ НЕ СООТВЕТСТВОВАЛ ФОРМАТУ. Исправь только формат, не меняй смысл и не добавляй новых изменений. Верни один JSON-объект строго вида {\"summary\":\"...\",\"changes\":[{\"path\":\"src/file.js\",\"content\":\"полное содержимое файла\",\"reason\":\"...\"}]}. Без Markdown и пояснений. Предыдущий ответ: "+raw.slice(0,5000));
+            if(!response.ok){const err=await response.text();throw new Error("OpenRouter North Mini Code: HTTP "+response.status+" при исправлении формата — "+err.slice(0,300));}
+            payload=await response.json();
+            parsed=parseCohereChangesResponse(payload);
+            if(!parsed){
+              const retryRaw=extractCohereResponseText(payload).replace(/\s+/g," ").slice(0,350)||"пустой ответ";
+              throw new Error("Cohere North Mini Code дважды вернула ответ без JSON-массива changes. Первый ответ: "+diagnostic+"; повтор: "+retryRaw);
+            }
+          }
+          if(parsed.changes.length>6)throw new Error("North предложила изменить больше 6 файлов.");
+          for(const change of parsed.changes){
+            if(!change||typeof change.path!=="string"||typeof change.content!=="string"||(Array.isArray(assignment.allowedPaths)&&assignment.allowedPaths.length&&!assignment.allowedPaths.includes(change.path))||!validRepoPath(change.path)||!(change.path==="index.html"||change.path.startsWith("src/")||change.path.startsWith("public/")||change.path.startsWith("worker/"))||change.path.split("/").some(part=>part.startsWith("."))||change.path.includes("node_modules")||change.path.includes("dist/")||change.content.length>250000)throw new Error("North вернула недопустимое изменение файла.");
           }
           return parsed;
         }
