@@ -650,3 +650,71 @@ button,input,textarea,select { font-family: 'Inter', sans-serif; }
   .chat-page .chat-composer textarea { min-height: 74px; font-size: 16px !important; }
   .chat-agent-indicator { font-size: 9px; }
 }
+
+
+/* Chat is a single viewport: no page or message-list scrolling. */
+.main-area.chat-active {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.chat-content {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: none;
+  min-height: 0;
+  height: calc(100dvh - 65px);
+  overflow: hidden;
+  padding: 0;
+}
+.chat-content .chat-page {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
+  padding: clamp(12px, 2vw, 24px);
+  gap: 10px;
+}
+.chat-content .chat-page-heading { flex: 0 0 auto; padding-bottom: 10px; }
+.chat-content .chat-page .chat-thread {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow: hidden;
+  align-content: start;
+  padding: 8px 2px;
+}
+.chat-content .chat-page .chat-composer {
+  position: relative;
+  inset: auto;
+  flex: 0 0 auto;
+  margin: 0;
+}
+.chat-content .chat-page .chat-composer textarea {
+  min-height: 54px;
+  max-height: 96px;
+  resize: none;
+}
+@media (max-width: 650px) {
+  .main-area.chat-active { height: 100dvh; }
+  .chat-content {
+    height: calc(100dvh - 65px - 68px - env(safe-area-inset-bottom));
+    padding: 0;
+  }
+  .chat-content .chat-page {
+    padding: 10px 12px 8px;
+    gap: 8px;
+  }
+  .chat-content .chat-page-heading { gap: 6px; padding: 0 1px 8px; }
+  .chat-content .chat-page-heading h1 { font-size: 22px; margin: 4px 0; }
+  .chat-content .chat-page-heading p { display: none; }
+  .chat-content .chat-agent-indicator { padding: 6px 9px; }
+  .chat-content .chat-page .chat-thread { padding: 4px 1px; }
+  .chat-content .chat-page .chat-composer { padding: 8px; border-radius: 14px; }
+  .chat-content .chat-page .chat-composer textarea { min-height: 48px; max-height: 72px; }
+  .chat-content .chat-page .composer-hint { display: none; }
+  .chat-content .chat-page .composer-footer { justify-content: flex-end; }
+}
