@@ -297,7 +297,9 @@ function App() {
             }
           }
         } catch (error) {
-          if (!cancelled) setTasks(current => current.map(task => task.jobId === item.jobId ? { ...task, lastStatusError: error.message } : task));
+          if (!cancelled) setTasks(current => current.some(task => task.jobId === item.jobId && task.lastStatusError !== error.message)
+            ? current.map(task => task.jobId === item.jobId ? { ...task, lastStatusError: error.message } : task)
+            : current);
         } finally {
           pollingJobs.current.delete(item.jobId);
         }
