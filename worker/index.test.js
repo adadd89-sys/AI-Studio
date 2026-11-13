@@ -502,6 +502,7 @@ describe("AI Studio Worker", () => {
   it("keeps lightweight chat separate from the development workflow", async () => {
     const cookie = await getSessionCookie();
     let requestedModel = "";
+    let requestedBudget = 0;
     const response = await worker.fetch(new Request("https://studio.test/api/chat", {
       method: "POST",
       headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
@@ -514,6 +515,7 @@ describe("AI Studio Worker", () => {
       ...env,
       AI: { run: async (model, input) => {
         requestedModel = model;
+        requestedBudget = input.max_completion_tokens;
         assert.equal(input.messages.at(-1).content, "Привет! Давай просто поговорим.");
         return { response: "Привет! Конечно, давай." };
       } }
@@ -524,6 +526,7 @@ describe("AI Studio Worker", () => {
     assert.equal(result.reply, "Привет! Конечно, давай.");
     assert.equal(result.usage.requests, 1);
     assert.equal(requestedModel, "@cf/qwen/qwen3.8-27b");
+    assert.equal(requestedBudget, 614);
   });
 
   it("does not contact a disabled agent in lightweight chat", async () => {
