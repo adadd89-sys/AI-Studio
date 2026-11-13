@@ -259,6 +259,7 @@ function App() {
   const [geminiCallStatus, setGeminiCallStatus] = useState(null);
   const [authState, setAuthState] = useState('checking');
   const [sessionRole, setSessionRole] = useState(null);
+  const [sessionUserId, setSessionUserId] = useState(null);
   const [userRows, setUserRows] = useState([]);
   const [newTelegramUserId, setNewTelegramUserId] = useState('');
   const [usersError, setUsersError] = useState('');
@@ -278,7 +279,7 @@ function App() {
     try { return JSON.parse(localStorage.getItem('ai-studio-usage-events') || '[]'); } catch { return []; }
   });
   const [usagePeriod, setUsagePeriod] = useState('today');
-  const [chatMessages, setChatMessages] = useState(() => { try { return JSON.parse(localStorage.getItem('ai-studio-chat') || '[]').slice(-24); } catch { return []; } });
+  const [chatMessages, setChatMessages] = useState([]);
   const [chatLoading, setChatLoading] = useState(false);
   const [chatStatus, setChatStatus] = useState('');
   const [chatGithubResult, setChatGithubResult] = useState(null);
@@ -430,8 +431,14 @@ function App() {
   }, [tasks]);
 
   useEffect(() => {
-    localStorage.setItem('ai-studio-chat', JSON.stringify(chatMessages.slice(-24)));
-  }, [chatMessages]);
+    if (!sessionUserId) return;
+    const key = 'ai-studio-chat:' + sessionUserId;
+    if (chatMessages.length === 0) {
+      try { setChatMessages(JSON.parse(localStorage.getItem(key) || '[]').slice(-24)); } catch { setChatMessages([]); }
+      return;
+    }
+    localStorage.setItem(key, JSON.stringify(chatMessages.slice(-24)));
+  }, [chatMessages, sessionUserId]);
 
   useEffect(() => {
     const thread = chatThreadRef.current;
@@ -583,14 +590,24 @@ function App() {
     ]).then(async ([health, session]) => {
       if (!active) return;
       setGeminiHealth(health);
-      if (session.authenticated) { setSessionRole(session.role || (session.isOwner ? 'owner' : 'user')); setAuthState('authenticated'); return; }
+      if (session.authenticated) {
+        const role = session.role || (session.isOwner ? 'owner' : 'user');
+        setSessionRole(role); setSessionUserId(String(session.telegramUserId || ''));
+        if (role !== 'owner') { setActive('Чат с ИИ'); setTeamSettings(current => ({ ...current, mode: 'chat' })); }
+        setAuthState('authenticated'); return;
+      }
       const telegram = window.Telegram?.WebApp;
       if (telegram?.initData && health.telegramAuthConfigured) {
         try {
           const response = await fetch('/api/telegram-login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ initData: telegram.initData }) });
           if (response.ok) {
             const refreshed = await fetch('/api/session').then(result => result.json());
-            if (active) { setSessionRole(refreshed.role || (refreshed.isOwner ? 'owner' : 'user')); setAuthState('authenticated'); }
+            if (active) {
+              const role = refreshed.role || (refreshed.isOwner ? 'owner' : 'user');
+              setSessionRole(role); setSessionUserId(String(refreshed.telegramUserId || ''));
+              if (role !== 'owner') { setActive('Чат с ИИ'); setTeamSettings(current => ({ ...current, mode: 'chat' })); }
+              setAuthState('authenticated');
+            }
             return;
           }
         } catch { /* Fall back to the existing password login. */ }
@@ -889,7 +906,7 @@ function App() {
         </div>
         <div className="nav-caption">РАБОЧЕЕ ПРОСТРАНСТВО</div>
         <nav className="navigation">
-          {navigation.filter(item => sessionRole === 'owner' || ['Обзор', 'Чат с ИИ'].includes(item.label)).map(item => {
+          {navigation.filter(item => sessionRole === 'owner' || item.label === 'Чат с ИИ').map(item => {
             const Icon = item.icon;
             return <button key={item.label} className={active === item.label ? 'nav-item active' : 'nav-item'} onClick={() => { setActive(item.label); updateTeamSetting('mode', item.label === 'Чат с ИИ' ? 'chat' : 'normal'); }}>
               <Icon size={17} /><span>{item.label}</span>{item.label === 'Процессы' && tasks.length > 0 && <i>{tasks.length}</i>}
