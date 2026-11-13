@@ -844,6 +844,33 @@ describe("AI Studio Worker", () => {
     } finally { globalThis.fetch = originalFetch; }
   });
 
+  it("switches to Gemini fallback after repeated 524 timeout responses in chat", async () => {
+    const cookie = await getSessionCookie();
+    const originalFetch = globalThis.fetch;
+    const requestedModels = [];
+    globalThis.fetch = async url => {
+      const target = String(url);
+      const model = target.match(/models\\/([^:]+):generateContent/)?.[1];
+      requestedModels.push(model);
+      if (model === "gemini-4-hydrogen") {
+        return new Response("upstream timeout", { status: 524 });
+      }
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "Ответ резервной модели после тайм-аута." }] } }] }), {
+        status: 200, headers: { "content-type": "application/json" }
+      });
+    };
+    try {
+      const response = await worker.fetch(new Request("https://studio.test/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+        body: JSON.stringify({ message: "Привет", teamSettings: { agents: { gemini: true, qwen: false, gemma: false, north: false } } })
+      }), env);
+      assert.equal(response.status, 200);
+      assert.equal((await response.json()).reply, "Ответ резервной модели после тайм-аута.");
+      assert.deepEqual(requestedModels, ["gemini-4-hydrogen", "gemini-4-hydrogen", "gemini-4-hydrogen", "gemini-3.8-flash"]);
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
   it("switches to Gemini fallback after repeated 503 responses in chat", async () => {
     const cookie = await getSessionCookie();
     const originalFetch = globalThis.fetch;
