@@ -652,7 +652,7 @@ button,input,textarea,select { font-family: 'Inter', sans-serif; }
 }
 
 
-/* Chat is a single viewport: no page or message-list scrolling. */
+/* Stable chat viewport: the message list shrinks, the composer never does. */
 .main-area.chat-active {
   height: 100dvh;
   min-height: 0;
@@ -660,18 +660,28 @@ button,input,textarea,select { font-family: 'Inter', sans-serif; }
   display: flex;
   flex-direction: column;
 }
+.main-area.chat-active > .topbar {
+  flex: 0 0 65px;
+  min-height: 65px;
+}
 .chat-content {
-  flex: 1 1 auto;
+  display: flex;
+  flex: 1 1 0;
   width: 100%;
   max-width: none;
+  min-width: 0;
   min-height: 0;
-  height: calc(100dvh - 65px);
+  height: auto;
   overflow: hidden;
   padding: 0;
 }
 .chat-content .chat-page {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
   width: 100%;
   height: 100%;
+  min-width: 0;
   min-height: 0;
   max-height: 100%;
   overflow: hidden;
@@ -680,32 +690,59 @@ button,input,textarea,select { font-family: 'Inter', sans-serif; }
 }
 .chat-content .chat-page-heading { flex: 0 0 auto; padding-bottom: 10px; }
 .chat-content .chat-page .chat-thread {
-  flex: 1 1 auto;
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
   min-height: 0;
   max-height: none;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   align-content: start;
   padding: 8px 2px;
+  overscroll-behavior: contain;
 }
-.chat-content .chat-page .chat-composer {
-  position: relative;
-  inset: auto;
-  flex: 0 0 auto;
+.chat-content .chat-page .chat-composer.chatgpt-composer {
+  display: flex !important;
+  position: sticky !important;
+  inset: auto !important;
+  bottom: 0 !important;
+  z-index: 50;
+  flex: 0 0 auto !important;
+  flex-shrink: 0 !important;
+  width: 100%;
+  min-height: 52px;
   margin: 0;
+  visibility: visible !important;
+  opacity: 1 !important;
+  transform: none !important;
 }
 .chat-content .chat-page .chat-composer textarea {
-  min-height: 54px;
+  min-height: 34px;
   max-height: 96px;
   resize: none;
 }
+.chat-content .chat-page .chat-send-button {
+  display: grid !important;
+  flex: 0 0 36px !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
 @media (max-width: 650px) {
   .main-area.chat-active { height: 100dvh; }
+  .main-area.chat-active > .topbar {
+    flex-basis: 56px;
+    min-height: 56px;
+  }
   .chat-content {
-    height: calc(100dvh - 65px - 68px - env(safe-area-inset-bottom));
+    flex: 1 1 0;
+    height: auto;
+    min-height: 0;
     padding: 0;
   }
   .chat-content .chat-page {
-    padding: 10px 12px 8px;
+    min-height: 0;
+    padding: 10px 12px max(8px, env(safe-area-inset-bottom));
     gap: 8px;
   }
   .chat-content .chat-page-heading { gap: 6px; padding: 0 1px 8px; }
@@ -713,8 +750,15 @@ button,input,textarea,select { font-family: 'Inter', sans-serif; }
   .chat-content .chat-page-heading p { display: none; }
   .chat-content .chat-agent-indicator { padding: 6px 9px; }
   .chat-content .chat-page .chat-thread { padding: 4px 1px; }
-  .chat-content .chat-page .chat-composer { padding: 8px; border-radius: 14px; }
-  .chat-content .chat-page .chat-composer textarea { min-height: 48px; max-height: 72px; }
+  .chat-content .chat-page .chat-composer.chatgpt-composer {
+    padding: 6px 7px 6px 13px;
+    border-radius: 23px;
+    min-height: 48px;
+  }
+  .chat-content .chat-page .chatgpt-composer textarea {
+    min-height: 32px;
+    max-height: 72px;
+  }
   .chat-content .chat-page .composer-hint { display: none; }
   .chat-content .chat-page .composer-footer { justify-content: flex-end; }
 }
