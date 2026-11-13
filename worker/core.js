@@ -744,6 +744,7 @@ export default {
               const call = part.functionCall;
               let result;
               try {
+                if (!chatIsOwner) throw new Error("GitHub-инструменты доступны только владельцу AI Studio.");
                 result = await runGeminiGithubTool(call.name, call.args || {}, env, githubState);
               } catch (toolError) {
                 result = { error: toolError?.message || "Инструмент GitHub завершился ошибкой." };
