@@ -497,6 +497,7 @@ function App() {
     if (teamSettings.mode === 'chat') {
       setChatLoading(true);
       setChatStatus('Запрос отправлен. Ожидаю ответ модели…');
+      setChatMessages(current => [...current, { role: 'user', content: value }].slice(-24));
       try {
         const response = await fetch('/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: value, history: chatMessages, teamSettings }) });
         const data = await response.json();
@@ -504,7 +505,7 @@ function App() {
         setLastPlan(null);
         setExecutionResult(null);
         const reply = String(data.reply || 'Ответ не получен.');
-        setChatMessages(current => [...current, { role: 'user', content: value }, { role: 'assistant', content: '', agent: data.agent }].slice(-24));
+        setChatMessages(current => [...current, { role: 'assistant', content: '', agent: data.agent }].slice(-24));
         setTask('');
         setChatStatus('Ответ получен · показываю постепенно');
         for (let index = 0; index < reply.length; index += 28) {
