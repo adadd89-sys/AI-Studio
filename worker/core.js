@@ -726,6 +726,14 @@ export default {
         if (!result.parsed) {
           const repairPrompt = prompt + "\\n\\nВАЖНО: предыдущая попытка не дала корректный JSON. Повтори ответ заново и верни один полностью завершённый JSON-объект без Markdown, вступления и пояснений. Соблюдай все требуемые поля. Сделай значения краткими, чтобы ответ гарантированно поместился.";
           result = await call(model, repairPrompt, Math.max(baseTokenBudget, 3072));
+          // If the repair request hits a transient outage, try the configured fallback model
+          // once rather than failing the whole task after the primary model's JSON issue.
+          if (!result.response.ok && [429,500,502,503,504].includes(result.response.status) &&
+              model === primaryModel && fallbackModel !== primaryModel) {
+            model = fallbackModel;
+            fallbackUsed = true;
+            result = await call(model, repairPrompt, Math.max(baseTokenBudget, 3072));
+          }
         }
         if (!result.response.ok) {
           const error = new Error("Повторная попытка Gemini завершилась ошибкой HTTP " + result.response.status);
