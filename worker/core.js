@@ -84,7 +84,7 @@ async function createSession(secret, identity = {}) {
   return payload + "." + signature;
 }
 
-async function isValidSession(request, secret) {
+export async function isValidSession(request, secret) {
   if (!secret) return false;
   const cookie = request.headers.get("cookie") || "";
   const token = cookie.split(";").map(part => part.trim())
@@ -183,7 +183,7 @@ function githubError(error) {
   return json({ error: error?.message || "Не удалось выполнить запрос к GitHub." }, status);
 }
 
-function hasAuthProvider(env) {
+export function hasAuthProvider(env) {
   return Boolean(env.SESSION_SECRET && (env.APP_PASSWORD || env.TELEGRAM_BOT_TOKEN));
 }
 
