@@ -496,7 +496,7 @@ function App() {
     setTaskError('');
     if (teamSettings.mode === 'chat') {
       setChatLoading(true);
-      setChatStatus('Запрос отправлен. Ожидаю ответ модели…');
+      setChatStatus('Gemini получает запрос и готовит ответ…');
       setChatMessages(current => [...current, { role: 'user', content: value }].slice(-24));
       try {
         const response = await fetch('/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: value, history: chatMessages, teamSettings }) });
@@ -507,22 +507,23 @@ function App() {
         const reply = String(data.reply || 'Ответ не получен.');
         setChatMessages(current => [...current, { role: 'assistant', content: '', agent: data.agent }].slice(-24));
         setTask('');
-        setChatStatus('Ответ получен · показываю постепенно');
-        for (let index = 0; index < reply.length; index += 28) {
-          const chunk = reply.slice(index, index + 28);
+        setChatStatus('Ответ получен · постепенно вывожу текст…');
+        for (let index = 0; index < reply.length; index += 6) {
+          const chunk = reply.slice(index, index + 6);
           setChatMessages(current => current.map((item, itemIndex) => itemIndex === current.length - 1
             ? { ...item, content: item.content + chunk }
             : item));
-          await new Promise(resolve => setTimeout(resolve, 18));
+          await new Promise(resolve => setTimeout(resolve, 24));
         }
+        setChatStatus('Ответ готов · ' + (data.agent || 'ИИ'));
         setUsageEvents(current => [{ id: Date.now(), at: new Date().toISOString(), mode: 'chat', intensity: teamSettings.intensity, agents: data.agentsUsed || [data.agent], requests: data.usage?.requests ?? 1, neurons: null, task: value.slice(0,160) }, ...current].slice(0,300));
         setReviewStatus('Ответ получен от ' + data.agent + '. В режиме общения разработка и GitHub не запускаются.');
       } catch (error) {
+        setChatStatus('Не удалось получить ответ');
         setTaskError(error.message || 'Не удалось получить ответ.');
       } finally {
         setIsSubmitting(false);
         setChatLoading(false);
-        setChatStatus('');
       }
       return;
     }
@@ -768,17 +769,18 @@ function App() {
           </section>}
 
           <section className={teamSettings.mode === 'chat' ? 'task-panel chat-mode' : 'task-panel'}>
-            <div className="task-panel-heading"><div className="task-icon"><Command size={18} /></div><div><h2>{teamSettings.mode === 'chat' ? 'Чат с ИИ' : 'Новая задача'}</h2><p>{teamSettings.mode === 'chat' ? 'Общайтесь с выбранной моделью — ответ появится постепенно' : 'Опишите, что нужно создать или улучшить'}</p></div><span className="task-step">{teamSettings.mode === 'chat' ? 'AI CHAT' : '01 / ЗАПУСК'}</span></div>
+            <div className="task-panel-heading"><div className="task-icon"><Command size={18} /></div><div><h2>{teamSettings.mode === 'chat' ? 'Чат с ИИ' : 'Новая задача'}</h2><p>{teamSettings.mode === 'chat' ? 'Общайтесь с выбранной моделью — ответ появится постепенно' : 'Опишите, что нужно создать или улучшить'}</p></div><div className="task-mode-switch" aria-label="Режим работы"><button type="button" className={teamSettings.mode === 'chat' ? 'active' : ''} onClick={() => updateTeamSetting('mode','chat')}><MessageCircle size={14}/> Чат</button><button type="button" className={teamSettings.mode !== 'chat' ? 'active' : ''} onClick={() => updateTeamSetting('mode','normal')}><Terminal size={14}/> Задача</button></div></div>
             {teamSettings.mode === 'chat' && <div className="chat-thread" ref={chatThreadRef} aria-live="polite">
               {chatMessages.length === 0 && <div className="chat-empty"><div className="chat-empty-orb"><BrainCircuit size={25}/></div><strong>С чего начнём?</strong><span>Напишите сообщение — команда ИИ ответит в этом чате.</span></div>}
               {chatMessages.map((item,index) => <div key={index} className={'chat-message ' + item.role}><span>{item.role === 'user' ? 'Вы' : item.agent || 'AI Studio'}</span><p>{item.content || (item.role === 'assistant' ? <span className="typing-dots"><i/><i/><i/></span> : '')}</p></div>)}
-              {chatLoading && <div className="chat-working"><span className="working-pulse"/><span>{chatStatus || 'Модель готовит ответ…'}</span></div>}
+              {(chatLoading || chatStatus) && <div className={'chat-working ' + (!chatLoading ? 'complete' : '')} role="status"><span className={chatLoading ? 'working-pulse' : 'working-check'}>{chatLoading ? '' : '✓'}</span><span>{chatStatus || 'Модель готовит ответ…'}</span></div>}
             </div>}
             <form onSubmit={submitTask}>
               {teamSettings.mode !== 'chat' && <label className="task-project-select">Проект <select value={selectedProjectId} onChange={event => setSelectedProjectId(event.target.value)}><option value="">Без проекта</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>}
               <textarea value={task} onChange={e => setTask(e.target.value)} placeholder={teamSettings.mode === 'chat' ? "Напишите сообщение команде…" : "Например: создай Telegram-бота для записи клиентов, продумай архитектуру, напиши код и проверь его..."} rows={3} />
               <div className="composer-footer"><div className="composer-hint"><Sparkles size={14} /> {teamSettings.mode === 'chat' ? "Один агент отвечает без запуска задач" : "Интенсивность " + teamSettings.intensity + "% · активные агенты по настройкам"}</div><button className="primary-button" type="submit" disabled={!task.trim() || isSubmitting}>{isSubmitting ? (teamSettings.mode === 'chat' ? 'Отвечаем…' : 'Команда работает…') : (teamSettings.mode === 'chat' ? 'Отправить' : 'Запустить команду')} <Send size={15} /></button></div>
             </form>
+            {teamSettings.mode !== 'chat' && isSubmitting && <div className="task-progress" role="status" aria-live="polite"><span className="working-pulse"/><div><strong>Команда работает над задачей</strong><span>{reviewStatus || 'Агенты анализируют запрос и готовят результат…'}</span></div></div>}
             {taskError && <div className="task-error" role="alert">{taskError}</div>}
             {lastPlan && <div className="generated-plan">
               <div className="plan-header"><div><span className="eyebrow">ПЛАН · {lastPlan.model}</span><h3>{lastPlan.summary}</h3></div><div className="plan-model-stack"><span className="plan-model">{lastPlan.model}</span><span className={lastPlan.fallbackUsed ? 'model-route fallback' : 'model-route'}>{lastPlan.fallbackUsed ? 'Резервное переключение' : 'Основная модель'}</span></div></div>
