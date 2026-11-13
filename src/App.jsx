@@ -498,7 +498,8 @@ function App() {
     setReviewFailure(null);
     if (teamSettings.mode === 'chat') {
       setChatLoading(true);
-      setChatStatus('Gemini получает запрос и готовит ответ…');
+      const chatLead = teamSettings.agents.gemini ? 'Gemini' : teamSettings.agents.qwen ? 'Qwen' : teamSettings.agents.north ? 'Cohere North' : 'Gemma';
+      setChatStatus(chatLead + ' получает запрос и готовит ответ…');
       setChatMessages(current => [...current, { role: 'user', content: value }].slice(-24));
       try {
         const response = await fetch('/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: value, history: chatMessages, teamSettings }) });
@@ -783,7 +784,7 @@ function App() {
             {teamSettings.mode === 'chat' && <div className="chat-thread" ref={chatThreadRef} aria-live="polite">
               {chatMessages.length === 0 && <div className="chat-empty"><div className="chat-empty-orb"><BrainCircuit size={25}/></div><strong>С чего начнём?</strong><span>Напишите сообщение — команда ИИ ответит в этом чате.</span></div>}
               {chatMessages.map((item,index) => <div key={index} className={'chat-message ' + item.role}><span>{item.role === 'user' ? 'Вы' : item.agent || 'AI Studio'}</span><p>{item.content || (item.role === 'assistant' ? <span className="typing-dots"><i/><i/><i/></span> : '')}</p></div>)}
-              {(chatLoading || chatStatus) && <div className={'chat-working ' + (!chatLoading ? 'complete' : '')} role="status"><span className={chatLoading ? 'working-pulse' : 'working-check'}>{chatLoading ? '' : '✓'}</span><span>{chatStatus || 'Модель готовит ответ…'}</span></div>}
+              {(chatLoading || chatStatus) && <div className={'chat-working ' + (chatLoading ? '' : chatStatus.startsWith('Не удалось') ? 'error' : 'complete')} role="status"><span className={chatLoading ? 'working-pulse' : chatStatus.startsWith('Не удалось') ? 'working-error' : 'working-check'}>{chatLoading ? '' : chatStatus.startsWith('Не удалось') ? '!' : '✓'}</span><span>{chatStatus || 'Модель готовит ответ…'}</span></div>}
             </div>}
             <form onSubmit={submitTask}>
               {teamSettings.mode !== 'chat' && <label className="task-project-select">Проект <select value={selectedProjectId} onChange={event => setSelectedProjectId(event.target.value)}><option value="">Без проекта</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>}
