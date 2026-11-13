@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Activity, Bot, BrainCircuit, Check, ChevronDown, ChevronRight,
+  Bot, BrainCircuit, Check, ChevronDown, ChevronRight,
   CircleHelp, Code2, Command, FolderKanban, GitBranch, LayoutDashboard,
   MessageSquare, Plus, Send, Settings2, ShieldCheck, Sparkles, Terminal,
   Users, Workflow, Zap, FileText, Save, RefreshCw, GitCommit, X, Gauge, BarChart3, MessageCircle
@@ -13,7 +13,6 @@ const navigation = [
   { label: 'Команда ИИ', icon: Users },
   { label: 'Процессы', icon: Workflow },
   { label: 'Код и файлы', icon: Code2 },
-  { label: 'Активность', icon: Activity },
   { label: 'Расход ресурсов', icon: BarChart3 }
 ];
 
@@ -685,13 +684,13 @@ function App() {
         </div>
       </aside>
 
-      <main className="main-area">
+      <main className={active === 'Чат с ИИ' ? "main-area chat-active" : "main-area"}>
         <header className="topbar">
           <div className="breadcrumbs"><span>AI Studio</span><ChevronRight size={14} /><strong>{title}</strong></div>
           <div className="topbar-right"><span className="date-label">{greeting}</span><button className="icon-button" aria-label="Помощь"><CircleHelp size={17} /></button><div className="top-avatar">Р</div></div>
         </header>
 
-        <div className="page-content">
+        <div className={active === 'Чат с ИИ' ? "page-content chat-content" : "page-content"}>
           {active === 'Чат с ИИ' ? <section className="task-panel chat-mode chat-page">
             <div className="chat-page-heading"><div><div className="eyebrow"><MessageCircle size={14}/> ЛИЧНЫЙ ДИАЛОГ</div><h1>Чат с ИИ</h1><p>Отдельное пространство для общения с выбранным агентом</p></div><div className="chat-agent-indicator"><span className="working-pulse"/>{teamSettings.agents.gemini ? 'Gemini · основной агент' : teamSettings.agents.qwen ? 'Qwen · основной агент' : 'Активный агент'}</div></div>
             <div className="chat-thread" ref={chatThreadRef} aria-live="polite">
@@ -852,19 +851,6 @@ function App() {
             </div>
           </section>
 
-          <section className="section-block lower-grid">
-            <div className="activity-panel">
-              <div className="section-heading compact"><div><div className="eyebrow">ПОСЛЕДНИЕ ДЕЙСТВИЯ</div><h2>Задачи и процессы</h2></div><button className="text-button" onClick={() => setActive('Процессы')}>Открыть все <ChevronRight size={14} /></button></div>
-              {tasks.length === 0 ? <div className="empty-state"><div className="empty-icon"><Terminal size={20} /></div><strong>Пока нет активных задач</strong><span>Здесь появятся ваши задачи и ход их выполнения.</span><button onClick={() => document.querySelector('textarea')?.focus()}><Plus size={14} /> Создать первую задачу</button></div> :
-                <div className="task-list">{(showAll ? tasks : tasks.slice(0, 3)).map(item => <div className="task-row" key={item.id}><div className="task-row-icon"><MessageSquare size={16} /></div><div className="task-row-main"><strong>{item.title}</strong><span>{item.time}</span></div><span className="draft-status">{item.status}</span></div>)}{tasks.length > 3 && <button className="text-button" onClick={() => setShowAll(v => !v)}>{showAll ? 'Свернуть' : 'Показать ещё'}</button>}</div>}
-            </div>
-            <div className="roadmap-panel"><div className="eyebrow">ПЛАН РАЗВИТИЯ</div><h2>От идеи до результата</h2><div className="roadmap-list">
-              <div className="roadmap-item done"><div className="roadmap-marker"><Check size={13} /></div><div><strong>Рабочая среда</strong><span>Интерфейс и структура проекта</span></div><em>Сейчас</em></div>
-              <div className="roadmap-item"><div className="roadmap-marker">2</div><div><strong>Подключение моделей</strong><span>Gemini и другие ИИ-агенты</span></div></div>
-              <div className="roadmap-item"><div className="roadmap-marker">3</div><div><strong>Совместная работа</strong><span>Планирование, код и ревью</span></div></div>
-              <div className="roadmap-item"><div className="roadmap-marker">4</div><div><strong>Тестирование и запуск</strong><span>Проверка и публикация проектов</span></div></div>
-            </div></div>
-          </section>
           <footer className="page-footer"><span>AI STUDIO <span className="footer-dot">·</span> Версия 0.1.0</span><span><Zap size={13} /> Создаём с помощью ИИ</span></footer>
           </>}
         </div>
