@@ -154,20 +154,17 @@ export default {
       if (teamSettings.agents.north && !env.OPENROUTER_API_KEY) return json({ error: "Cohere North Mini Code включён, но OPENROUTER_API_KEY ещё не добавлен в секреты Cloudflare." }, 503);
       if (!task) return json({ error: "Опишите задачу." }, 400);
       if (task.length > 6000) return json({ error: "Задача слишком длинная. Максимум — 6000 символов." }, 413);
+      let project = null;
+      const bodyProjectId = body?.projectId;
+      if (bodyProjectId !== undefined && bodyProjectId !== null && bodyProjectId !== "") {
+        if (typeof bodyProjectId !== "string" || !/^[a-f0-9-]{36}$/i.test(bodyProjectId)) return json({ error: "Недопустимый ID проекта." }, 400);
+        const projectRaw = await env.TASKS.get("user:" + userId + ":project:" + bodyProjectId);
+        if (!projectRaw) return json({ error: "Выбранный проект не найден." }, 404);
+        try { project = JSON.parse(projectRaw); } catch { return json({ error: "Запись проекта повреждена." }, 500); }
+      }
       try {
         const instance = await env.AI_STUDIO_WORKFLOW.create({ params: { task, teamSettings } });
         const jobId = await instance.id;
-        const bodyProjectId = body?.projectId;
-        let project = null;
-        if (bodyProjectId !== undefined && bodyProjectId !== null && bodyProjectId !== "") {
-          if (typeof bodyProjectId !== "string" || !/^[a-f0-9-]{36}$/i.test(bodyProjectId)) return json({ error: "Недопустимый ID проекта." }, 400);
-          const projectRaw = await env.TASKS.get("user:" + userId + ":project:" + bodyProjectId);
-          if (!projectRaw) return json({ error: "Выбранный проект не найден." }, 404);
-          project = JSON.parse(projectRaw);
-          project.taskCount = (Number(project.taskCount) || 0) + 1;
-          project.updatedAt = Date.now();
-          await env.TASKS.put("user:" + userId + ":project:" + bodyProjectId, JSON.stringify(project), { expirationTtl: TASK_TTL_SECONDS });
-        }
         const record = {
           jobId,
           title: task.slice(0, 180),
@@ -179,6 +176,11 @@ export default {
           projectName: project?.name || null
         };
         await env.TASKS.put(taskKey(userId, jobId), JSON.stringify(record), { expirationTtl: TASK_TTL_SECONDS });
+        if (project) {
+          project.taskCount = (Number(project.taskCount) || 0) + 1;
+          project.updatedAt = Date.now();
+          await env.TASKS.put("user:" + userId + ":project:" + project.id, JSON.stringify(project), { expirationTtl: TASK_TTL_SECONDS });
+        }
         return json({ ok: true, jobId, status: "queued", task: record }, 202);
       } catch (error) {
         return json({ error: "Не удалось создать асинхронную задачу.", detail: error?.message || null }, 502);
