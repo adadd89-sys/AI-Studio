@@ -9,12 +9,12 @@ const TASK_TTL_SECONDS = 60 * 60 * 24 * 90;
 
 async function authenticated(request, env) {
   if (!hasAuthProvider(env)) return json({ error: "Авторизация AI Studio не настроена." }, 503);
-  if (!await isValidSession(request, env.SESSION_SECRET)) return json({ error: "Требуется вход в AI Studio." }, 401);
+  if (!await isValidSession(request, env.SESSION_SECRET, env.TELEGRAM_OWNER_ID)) return json({ error: "Требуется вход в AI Studio." }, 401);
   return null;
 }
 
 async function taskOwner(request, env) {
-  const identity = await getSessionIdentity(request, env.SESSION_SECRET);
+  const identity = await getSessionIdentity(request, env.SESSION_SECRET, env.TELEGRAM_OWNER_ID);
   return identity?.telegramUserId ?? null;
 }
 
