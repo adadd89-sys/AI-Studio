@@ -1368,7 +1368,7 @@ export default {
           }) });
           pullRequest = { number: pr.number, url: pr.html_url, state: pr.state };
         } catch (prError) { pullRequestError = prError?.message || "Не удалось открыть Pull Request."; }
-        return json({ ok: true, task, plan, summary: implementation.summary || plan.summary,
+        return json({ ok: true, task, plan, delegation, pullRequest, pullRequestError, summary: implementation.summary || plan.summary,
           model: planResult.model, primaryModel, fallbackUsed: planResult.fallbackUsed,
           qwenModel, gemmaModel, branch, filesChanged: changed, agentsUsed: usage.agents,
           usage: { requests: usage.requests, neurons: null },
