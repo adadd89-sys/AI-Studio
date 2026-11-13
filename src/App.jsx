@@ -538,7 +538,7 @@ function App() {
       }
     }
     refreshPendingTasks();
-    const timer = setInterval(refreshPendingTasks, 4000);
+    const timer = setInterval(refreshPendingTasks, 10000);
     return () => { cancelled = true; clearInterval(timer); };
   }, [authState, tasks]);
 
