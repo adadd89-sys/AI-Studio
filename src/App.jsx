@@ -613,7 +613,22 @@ function App() {
         </header>
 
         <div className="page-content">
-          {active === 'Процессы' ? <section className="processes-page">
+          {active === 'Проекты' ? <section className="projects-page">
+            <div className="section-heading"><div><div className="eyebrow">ОБЩИЕ ДАННЫЕ · TELEGRAM CLOUD</div><h2>Мои проекты</h2></div><FolderKanban size={22}/></div>
+            <form className="settings-card" onSubmit={createProject}>
+              <div className="settings-title"><div><strong>Создать проект</strong><span>Проекты сохраняются на сервере и доступны с других устройств через Telegram.</span></div></div>
+              <input value={newProjectName} onChange={event => setNewProjectName(event.target.value)} placeholder="Название проекта" maxLength={100} required />
+              <textarea value={newProjectDescription} onChange={event => setNewProjectDescription(event.target.value)} placeholder="Краткое описание (необязательно)" rows={2} maxLength={1000} />
+              <button className="primary-button" type="submit" disabled={!newProjectName.trim() || projectBusy}>{projectBusy ? 'Сохраняем…' : 'Создать проект'} <Plus size={15}/></button>
+              {projectError && <div className="task-error" role="alert">{projectError}</div>}
+            </form>
+            {projects.length ? <div className="project-grid">{projects.map(project => <article className="settings-card project-card" key={project.id}>
+              <div className="project-card-heading"><strong>{project.name}</strong><span className={'process-state ' + (project.status === 'completed' ? 'success' : 'pending')}>{project.status === 'completed' ? 'Завершён' : project.status === 'paused' ? 'На паузе' : 'Активен'}</span></div>
+              {project.description && <p>{project.description}</p>}
+              <div className="project-meta"><span>Задач: {project.taskCount || 0}</span><span>Обновлён {new Date(project.updatedAt).toLocaleDateString('ru-RU')}</span></div>
+              <button className="subtle-button" type="button" onClick={() => { setSelectedProjectId(project.id); setActive('Обзор'); }}>Создать задачу в проекте <Plus size={14}/></button>
+            </article>)}</div> : <div className="settings-card"><strong>Проектов пока нет</strong><p className="settings-note">Создайте первый проект. Затем можно привязывать к нему задачи и вести общую историю.</p></div>}
+          </section> : active === 'Процессы' ? <section className="processes-page">
             <div className="section-heading"><div><div className="eyebrow">ИСТОРИЯ И ВЫПОЛНЕНИЕ</div><h2>Задачи и процессы</h2></div><button className="subtle-button" onClick={() => setActive('Обзор')}>Новая задача <Plus size={15}/></button></div>
             {tasks.length === 0 ? <div className="settings-card"><strong>История пока пуста</strong><p className="settings-note">Запущенные задачи будут автоматически сохраняться на этом устройстве. Если закрыть Telegram, после возвращения AI Studio восстановит проверку их статусов.</p></div> :
               <div className="process-list">{tasks.map(item => <article className="process-card" key={item.id}>
