@@ -260,7 +260,7 @@ function App() {
   const [authState, setAuthState] = useState('checking');
   const [sessionRole, setSessionRole] = useState(null);
   const [sessionUserId, setSessionUserId] = useState(null);
-  const [chatStorageReady, setChatStorageReady] = useState(false);
+  const [chatLoadedForUser, setChatLoadedForUser] = useState('');
   const [userRows, setUserRows] = useState([]);
   const [newTelegramUserId, setNewTelegramUserId] = useState('');
   const [usersError, setUsersError] = useState('');
@@ -433,16 +433,16 @@ function App() {
 
   useEffect(() => {
     if (!sessionUserId) return;
-    setChatStorageReady(false);
+    setChatLoadedForUser('');
     try { setChatMessages(JSON.parse(localStorage.getItem('ai-studio-chat:' + sessionUserId) || '[]').slice(-24)); }
     catch { setChatMessages([]); }
-    setChatStorageReady(true);
+    setChatLoadedForUser(sessionUserId);
   }, [sessionUserId]);
 
   useEffect(() => {
-    if (!sessionUserId || !chatStorageReady) return;
+    if (!sessionUserId || chatLoadedForUser !== sessionUserId) return;
     localStorage.setItem('ai-studio-chat:' + sessionUserId, JSON.stringify(chatMessages.slice(-24)));
-  }, [chatMessages, sessionUserId, chatStorageReady]);
+  }, [chatMessages, sessionUserId, chatLoadedForUser]);
 
   useEffect(() => {
     const thread = chatThreadRef.current;
