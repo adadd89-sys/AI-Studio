@@ -270,7 +270,7 @@ function UsersAdmin() {
 
   async function addUser(event) {
     event.preventDefault();
-    if (busy || !/^\\d{1,20}$/.test(telegramUserId.trim())) return;
+    if (busy || !/^\d{1,20}$/.test(telegramUserId.trim())) return;
     setBusy(true);
     setError('');
     setNotice('');
@@ -310,7 +310,7 @@ function UsersAdmin() {
       <form className="user-add-form" onSubmit={addUser}>
         <label>Telegram ID<input inputMode="numeric" value={telegramUserId} onChange={event => setTelegramUserId(event.target.value.replace(/[^0-9]/g, '').slice(0,20))} placeholder="Например, 123456789" required /></label>
         <label>Имя для списка<input value={name} onChange={event => setName(event.target.value)} placeholder="Имя пользователя" maxLength={80}/></label>
-        <button className="primary-button" type="submit" disabled={busy || !/^\\d{1,20}$/.test(telegramUserId.trim())}>{busy ? 'Сохраняем…' : 'Добавить доступ'} <UserPlus size={15}/></button>
+        <button className="primary-button" type="submit" disabled={busy || !/^\d{1,20}$/.test(telegramUserId.trim())}>{busy ? 'Сохраняем…' : 'Добавить доступ'} <UserPlus size={15}/></button>
       </form>
       {error && <div className="task-error" role="alert">{error}</div>}
       {notice && <p className="settings-note">{notice}</p>}
