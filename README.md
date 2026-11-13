@@ -44,7 +44,7 @@ npm run build
 
 AI Studio supports an owner account and invited Telegram users. The owner is configured with `TELEGRAM_OWNER_ID`; invited user IDs are stored in the existing Cloudflare KV namespace bound as `TASKS` under the key `access:telegram-users`.
 
-The owner can manage invited accounts in the **Пользователи** section of the app. Add a numeric Telegram user ID to grant access, or revoke it to block the account. The Worker checks the allowlist on every authenticated request, so revocation invalidates an existing session on its next request.
+The owner can manage invited accounts in the **Пользователи** section of the app. Add a numeric Telegram user ID to grant access, or revoke it to block the account. The Worker checks the allowlist on every authenticated request. Because Cloudflare KV is eventually consistent, a newly granted or revoked account may take a short time to propagate globally; after propagation, the next request reflects the updated access.
 
 Invited users receive the ordinary-user role:
 - They can use the AI chat.
