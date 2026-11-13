@@ -42,40 +42,15 @@ npm run build
 
 ## Access protection
 
-The Worker protects `POST /api/plan` with a signed, HttpOnly session cookie. Before using the app, add these secrets in Cloudflare Workers & Pages → `ai-studio` → Settings → Variables and Secrets:
+AI Studio is a private, owner-only Telegram Mini App. The Worker accepts a session only when its signed Telegram user ID matches the configured `TELEGRAM_OWNER_ID`. Password login is disabled. The owner allowlist is enforced by the server on every protected API route; an old password or Telegram session belonging to another account is rejected.
 
-- `APP_PASSWORD`: choose a long, unique password for the private workspace.
-- `SESSION_SECRET`: generate a random secret of at least 32 bytes (for example, with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`).
+Configure these as encrypted Cloudflare Worker secrets:
 
-Add both as encrypted **Secrets**, not plain text variables. The session expires after 7 days. Never commit either value or send it in chat. The public health endpoint reveals only whether model/auth secrets are configured; it does not expose their values.
+- `TELEGRAM_BOT_TOKEN`: token of the Telegram bot that owns the Mini App.
+- `TELEGRAM_OWNER_ID`: your numeric Telegram user ID (not your username).
+- `SESSION_SECRET`: a random secret of at least 32 bytes.
 
-## Telegram login and shared task history
-
-Shared task history is scoped to the verified Telegram user ID. Password-only sessions can still use the private workspace, but cannot read or start tasks that require cross-device history.
-
-For Telegram Mini App login, add these encrypted Worker secrets:
-
-- `TELEGRAM_BOT_TOKEN`: token from the Telegram bot that owns the Mini App.
-- `SESSION_SECRET`: the same strong signing secret used for session cookies.
-
-Create a free Cloudflare Workers KV namespace:
-
-```bash
-npx wrangler kv namespace create AI_STUDIO_TASKS
-```
-
-Copy the returned namespace ID into `wrangler.jsonc`:
-
-```jsonc
-"kv_namespaces": [
-  {
-    "binding": "TASKS",
-    "id": "PASTE_THE_NAMESPACE_ID_HERE"
-  }
-]
-```
-
-Keep the real namespace ID in your private deployment configuration; do not commit credentials. After configuring the binding, deploy the Worker. The app stores up to 100 recent tasks per Telegram account and automatically expires KV records after 90 days. Task status and completed results are refreshed from Cloudflare Workflows when the app polls them. Projects use the same per-user KV namespace and retention window: users can create projects, attach new tasks to a project, and see each project's task count. Project and task records are isolated by verified Telegram user ID; password-only sessions cannot access the shared project/task APIs.
+If `TELEGRAM_OWNER_ID` is missing or invalid, authentication fails closed and no account can sign in. Telegram Mini App initData signatures and their 10-minute freshness are verified before the owner ID is checked. Sessions are HttpOnly, Secure, SameSite=Strict, and expire after 7 days. Never commit secrets or send them in chat.
 
 ## Gemini setup
 
