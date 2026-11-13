@@ -401,7 +401,13 @@ function App() {
 
   useEffect(() => {
     const telegram = window.Telegram?.WebApp;
-    if (telegram) { telegram.ready(); telegram.expand(); }
+    if (telegram) {
+      telegram.ready();
+      telegram.expand();
+      // Prevent Telegram's vertical swipe gesture from minimizing the Mini App
+      // while the user scrolls the chat history. Keep the close button available.
+      if (typeof telegram.disableVerticalSwipes === 'function') telegram.disableVerticalSwipes();
+    }
   }, []);
 
   useEffect(() => {
