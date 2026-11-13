@@ -418,6 +418,7 @@ export default {
         authenticated,
         isOwner,
         role: isOwner ? "owner" : authenticated ? "user" : null,
+        telegramUserId: authenticated ? identity.telegramUserId : null,
         authConfigured: hasAuthProvider(env),
         telegramAuthConfigured: hasAuthProvider(env)
       });
