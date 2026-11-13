@@ -690,29 +690,55 @@ export default {
       }
       async function callGemini(prompt) {
         usage.agents.push("gemini");
-        const requestBody = JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: { responseMimeType: "application/json", temperature: 0.2, maxOutputTokens: scaledTokenBudget(intensity, 768, 2048) }
-        });
-        async function call(model) {
+        const baseTokenBudget = scaledTokenBudget(intensity, 768, 2048);
+        async function call(model, instruction, maxOutputTokens) {
           usage.requests++;
-          return fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) +
+          const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) +
             ":generateContent?key=" + encodeURIComponent(env.GEMINI_API_KEY), {
-              method: "POST", headers: { "content-type": "application/json" }, body: requestBody
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                contents: [{ role: "user", parts: [{ text: instruction }] }],
+                generationConfig: { responseMimeType: "application/json", temperature: 0.1, maxOutputTokens }
+              })
             });
+          if (!response.ok) return { response, parsed: null, raw: "" };
+          const payload = await response.json();
+          const raw = payload?.candidates?.[0]?.content?.parts?.map(part => part.text || "").join("").trim() || "";
+          return { response, parsed: parseJsonObject(raw), raw, finishReason: payload?.candidates?.[0]?.finishReason || null, blockReason: payload?.promptFeedback?.blockReason || null };
         }
+
         let model = primaryModel;
-        let response = await call(primaryModel);
+        let result = await call(model, prompt, baseTokenBudget);
         let fallbackUsed = false;
-        if (!response.ok && [429,500,502,503,504].includes(response.status) && fallbackModel !== primaryModel) {
-          model = fallbackModel; fallbackUsed = true; response = await call(fallbackModel);
+        if (!result.response.ok && [429,500,502,503,504].includes(result.response.status) && fallbackModel !== primaryModel) {
+          model = fallbackModel;
+          fallbackUsed = true;
+          result = await call(model, prompt, baseTokenBudget);
         }
-        if (!response.ok) { const error = new Error("Gemini API вернул ошибку " + response.status); error.status = response.status; throw error; }
-        const payload = await response.json();
-        const raw = payload?.candidates?.[0]?.content?.parts?.map(part => part.text || "").join("").trim();
-        const parsed = parseJsonObject(raw);
-        if (!parsed) throw new Error("Gemini вернул ответ не в формате JSON.");
-        return { data: parsed, model, fallbackUsed };
+        if (!result.response.ok) {
+          const error = new Error("Gemini API вернул ошибку " + result.response.status);
+          error.status = result.response.status;
+          throw error;
+        }
+
+        // One bounded repair attempt handles occasional prose, markdown fences, or truncated JSON.
+        if (!result.parsed) {
+          const repairPrompt = prompt + "\\n\\nВАЖНО: предыдущая попытка не дала корректный JSON. Повтори ответ заново и верни один полностью завершённый JSON-объект без Markdown, вступления и пояснений. Соблюдай все требуемые поля. Сделай значения краткими, чтобы ответ гарантированно поместился.";
+          result = await call(model, repairPrompt, Math.max(baseTokenBudget, 3072));
+        }
+        if (!result.response.ok) {
+          const error = new Error("Повторная попытка Gemini завершилась ошибкой HTTP " + result.response.status);
+          error.status = result.response.status;
+          throw error;
+        }
+        if (!result.parsed) {
+          const reason = result.blockReason ? " Запрос заблокирован: " + result.blockReason + "." :
+            result.finishReason === "MAX_TOKENS" ? " Ответ обрезан из-за лимита токенов." :
+            !result.raw ? " Gemini вернул пустой ответ." : " Ответ не удалось разобрать как JSON.";
+          throw new Error("Gemini не смог сформировать корректный JSON после повторной попытки." + reason);
+        }
+        return { data: result.parsed, model, fallbackUsed };
       }
 
       let executionStage = "gemini_plan";
