@@ -142,6 +142,10 @@ export default {
         mode: ["chat", "normal", "max"].includes(rawSettings.mode) ? rawSettings.mode : "normal",
         agents: {
           gemini: rawSettings.agents?.gemini !== false,
+          gemini38: rawSettings.agents?.gemini38 === true,
+          gemini36: rawSettings.agents?.gemini36 === true,
+          geminiLite: rawSettings.agents?.geminiLite === true,
+          gemini31Lite: rawSettings.agents?.gemini31Lite === true,
           qwen: rawSettings.agents?.qwen !== false,
           gemma: rawSettings.agents?.gemma !== false,
           north: rawSettings.agents?.north === true
@@ -149,7 +153,8 @@ export default {
       };
       if (teamSettings.mode === "chat") return json({ error: "Для режима общения используйте отдельный маршрут /api/chat." }, 400);
       if (!teamSettings.agents.qwen && !teamSettings.agents.north) return json({ error: "Включите Qwen или Cohere North Mini Code — нужен хотя бы один разработчик." }, 400);
-      if (teamSettings.agents.gemini && !env.GEMINI_API_KEY) return json({ error: "Gemini включён, но GEMINI_API_KEY не настроен." }, 503);
+      const geminiEnabled = ["gemini", "gemini38", "gemini36", "geminiLite", "gemini31Lite"].some(key => teamSettings.agents[key]);
+      if (geminiEnabled && !env.GEMINI_API_KEY) return json({ error: "Gemini включён, но GEMINI_API_KEY не настроен." }, 503);
       if ((teamSettings.agents.qwen || (teamSettings.agents.gemma && teamSettings.intensity >= 50)) && !env.AI) return json({ error: "Для включённых Qwen/Gemma требуется Cloudflare Workers AI." }, 503);
       if (teamSettings.agents.north && !env.OPENROUTER_API_KEY) return json({ error: "Cohere North Mini Code включён, но OPENROUTER_API_KEY ещё не добавлен в секреты Cloudflare." }, 503);
       if (!task) return json({ error: "Опишите задачу." }, 400);
