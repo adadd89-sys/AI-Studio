@@ -178,6 +178,67 @@ describe("AI Studio Worker", () => {
     assert.equal(response.status, 403);
   });
 
+  it("allows an owner-approved Telegram user to sign in, but blocks repository work", async () => {
+    const ownerCookie = await getSessionCookie();
+    const records = new Map();
+    const store = {
+      get: async key => records.get(key) || null,
+      put: async (key, value) => { records.set(key, value); }
+    };
+    const addResponse = await worker.fetch(new Request("https://studio.test/api/users", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: ownerCookie, origin: "https://studio.test" },
+      body: JSON.stringify({ telegramUserId: "123456789" })
+    }), { ...env, TASKS: store });
+    assert.equal(addResponse.status, 200);
+    assert.equal((await addResponse.json()).users[0].role, "user");
+
+    const initData = await createTelegramInitData(123456789);
+    const loginResponse = await worker.fetch(new Request("https://studio.test/api/telegram-login", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://studio.test" },
+      body: JSON.stringify({ initData })
+    }), { ...env, TASKS: store });
+    assert.equal(loginResponse.status, 200);
+    const cookie = loginResponse.headers.get("set-cookie").split(";")[0];
+
+    const sessionResponse = await worker.fetch(new Request("https://studio.test/api/session", { headers: { cookie } }), { ...env, TASKS: store });
+    assert.deepEqual(await sessionResponse.json(), {
+      authenticated: true, isOwner: false, role: "user", authConfigured: true, telegramAuthConfigured: true
+    });
+
+    const blocked = await worker.fetch(new Request("https://studio.test/api/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+      body: JSON.stringify({ message: "Исправь код в GitHub" })
+    }), { ...env, TASKS: store });
+    assert.equal(blocked.status, 403);
+  });
+
+  it("revokes an invited user's access immediately after removal", async () => {
+    const ownerCookie = await getSessionCookie();
+    const records = new Map([["access:telegram-users", JSON.stringify([
+      { telegramUserId: "123456789", role: "user", active: true }
+    ])]]);
+    const store = { get: async key => records.get(key) || null, put: async (key, value) => records.set(key, value) };
+    const initData = await createTelegramInitData(123456789);
+    const loginResponse = await worker.fetch(new Request("https://studio.test/api/telegram-login", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://studio.test" },
+      body: JSON.stringify({ initData })
+    }), { ...env, TASKS: store });
+    assert.equal(loginResponse.status, 200);
+    const cookie = loginResponse.headers.get("set-cookie").split(";")[0];
+    const revoke = await worker.fetch(new Request("https://studio.test/api/users", {
+      method: "DELETE",
+      headers: { "content-type": "application/json", cookie: ownerCookie, origin: "https://studio.test" },
+      body: JSON.stringify({ telegramUserId: "123456789" })
+    }), { ...env, TASKS: store });
+    assert.equal(revoke.status, 200);
+    const session = await worker.fetch(new Request("https://studio.test/api/session", { headers: { cookie } }), { ...env, TASKS: store });
+    assert.equal((await session.json()).authenticated, false);
+  });
+
   it("rejects a valid Telegram signature from a non-owner account", async () => {
     const initData = await createTelegramInitData(123456789);
     const response = await worker.fetch(new Request("https://studio.test/api/telegram-login", {
