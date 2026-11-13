@@ -1,4 +1,4 @@
-import worker from "./core.js";
+import worker, { hasAuthProvider, isValidSession } from "./core.js";
 import { AIStudioWorkflow } from "./workflow.js";
 
 export { AIStudioWorkflow };
@@ -7,31 +7,8 @@ const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" };
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: JSON_HEADERS });
 
 async function authenticated(request, env) {
-  if (!env.SESSION_SECRET || !(env.APP_PASSWORD || env.TELEGRAM_BOT_TOKEN)) return json({ error: "Авторизация AI Studio не настроена." }, 503);
-  const cookie = request.headers.get("cookie") || "";
-  const token = cookie.split(";").map(part => part.trim())
-    .find(part => part.startsWith("ai_studio_session="))?.slice("ai_studio_session=".length);
-  if (!token) return json({ error: "Требуется вход в AI Studio." }, 401);
-  const [payload, signature, extra] = token.split(".");
-  if (!payload || !signature || extra) return json({ error: "Требуется вход в AI Studio." }, 401);
-  try {
-    const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(env.SESSION_SECRET),
-      { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
-    const base64 = signature.replace(/-/g, "+").replace(/_/g, "/");
-    const padded = base64 + "=".repeat((4 - base64.length % 4) % 4);
-    const binary = atob(padded);
-    const bytes = Uint8Array.from(binary, char => char.charCodeAt(0));
-    if (!await crypto.subtle.verify("HMAC", key, bytes, new TextEncoder().encode(payload))) {
-      return json({ error: "Требуется вход в AI Studio." }, 401);
-    }
-    const decoded = payload.replace(/-/g, "+").replace(/_/g, "/");
-    const paddedPayload = decoded + "=".repeat((4 - decoded.length % 4) % 4);
-    const raw = atob(paddedPayload);
-    const session = JSON.parse(new TextDecoder().decode(Uint8Array.from(raw, char => char.charCodeAt(0))));
-    if (!Number.isInteger(session.exp) || session.exp <= Math.floor(Date.now() / 1000)) {
-      return json({ error: "Сессия истекла. Войдите снова." }, 401);
-    }
-  } catch { return json({ error: "Требуется вход в AI Studio." }, 401); }
+  if (!hasAuthProvider(env)) return json({ error: "Авторизация AI Studio не настроена." }, 503);
+  if (!await isValidSession(request, env.SESSION_SECRET)) return json({ error: "Требуется вход в AI Studio." }, 401);
   return null;
 }
 
