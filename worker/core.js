@@ -378,8 +378,10 @@ export default {
     }
 
     if (url.pathname === "/api/session" && request.method === "GET") {
+      const accessUser = await getAccessUser(request, env);
       return json({
-        authenticated: await isValidSession(request, env.SESSION_SECRET, env.TELEGRAM_OWNER_ID),
+        authenticated: Boolean(accessUser),
+        user: accessUser ? { telegramUserId: accessUser.telegramUserId, role: accessUser.role, name: accessUser.name } : null,
         authConfigured: hasAuthProvider(env),
         telegramAuthConfigured: hasAuthProvider(env)
       });
@@ -392,7 +394,10 @@ export default {
       const body = await request.json().catch(() => null);
       const user = await verifyTelegramInitData(body?.initData, env.TELEGRAM_BOT_TOKEN);
       if (!user) return json({ error: "Подпись Telegram недействительна или данные авторизации устарели." }, 401);
-      if (String(user.id) !== String(env.TELEGRAM_OWNER_ID)) return json({ error: "Доступ запрещён. Этот Telegram-аккаунт не является владельцем AI Studio." }, 403);
+      if (String(user.id) !== String(env.TELEGRAM_OWNER_ID)) {
+        const allowed = (await readAllowedUsers(env.TASKS)).some(item => String(item.telegramUserId) === String(user.id));
+        if (!allowed) return json({ error: "Доступ запрещён. Попросите владельца добавить ваш Telegram ID в список пользователей AI Studio." }, 403);
+      }
       const token = await createSession(env.SESSION_SECRET, { telegramUserId: user.id });
       return json({ ok: true }, 200, {
         "set-cookie": SESSION_COOKIE + "=" + token + "; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=" + SESSION_TTL_SECONDS
@@ -415,7 +420,7 @@ export default {
       if (!hasAuthProvider(env)) {
         return json({ error: "Авторизация ещё не настроена." }, 503);
       }
-      if (!await isValidSession(request, env.SESSION_SECRET, env.TELEGRAM_OWNER_ID)) {
+      if (!await isAllowedSession(request, env)) {
         return json({ error: "Требуется вход в AI Studio." }, 401);
       }
       if (!env.GEMINI_API_KEY) {
@@ -460,7 +465,7 @@ export default {
       if (!hasAuthProvider(env)) {
         return json({ error: "Авторизация ещё не настроена." }, 503);
       }
-      if (!await isValidSession(request, env.SESSION_SECRET, env.TELEGRAM_OWNER_ID)) {
+      if (!await isAllowedSession(request, env)) {
         return json({ error: "Требуется вход в AI Studio." }, 401);
       }
       if (!env.AI) {
@@ -516,7 +521,7 @@ export default {
       if (!hasAuthProvider(env)) {
         return json({ error: "Авторизация ещё не настроена." }, 503);
       }
-      if (!await isValidSession(request, env.SESSION_SECRET, env.TELEGRAM_OWNER_ID)) {
+      if (!await isAllowedSession(request, env)) {
         return json({ error: "Требуется вход в AI Studio." }, 401);
       }
       if (!env.AI) {
@@ -659,7 +664,7 @@ export default {
 
     if (url.pathname === "/api/chat" && request.method === "POST") {
       if (!hasAuthProvider(env)) return json({ error: "Авторизация AI Studio не настроена." }, 503);
-      if (!await isValidSession(request, env.SESSION_SECRET, env.TELEGRAM_OWNER_ID)) return json({ error: "Требуется вход в AI Studio." }, 401);
+      if (!await isAllowedSession(request, env)) return json({ error: "Требуется вход в AI Studio." }, 401);
       if (!hasSameOrigin(request)) return json({ error: "Недопустимый источник запроса." }, 403);
       const body = await request.json().catch(() => null);
       const message = typeof body?.message === "string" ? body.message.trim() : "";
@@ -766,7 +771,7 @@ export default {
 
     if (url.pathname === "/api/execute" && request.method === "POST") {
       if (!hasAuthProvider(env)) return json({ error: "Авторизация ещё не настроена." }, 503);
-      if (!await isValidSession(request, env.SESSION_SECRET, env.TELEGRAM_OWNER_ID)) return json({ error: "Требуется вход в AI Studio." }, 401);
+      if (!await isAllowedSession(request, env)) return json({ error: "Требуется вход в AI Studio." }, 401);
       if (!hasSameOrigin(request)) return json({ error: "Недопустимый источник запроса." }, 403);
       if (!env.GITHUB_TOKEN) return json({ error: "GitHub не подключён. Проверьте GITHUB_TOKEN." }, 503);
 
@@ -1203,7 +1208,7 @@ export default {
       if (!hasAuthProvider(env)) {
         return json({ error: "Закрытый доступ не настроен. Добавьте TELEGRAM_BOT_TOKEN, TELEGRAM_OWNER_ID и SESSION_SECRET в секреты Worker." }, 503);
       }
-      if (!await isValidSession(request, env.SESSION_SECRET, env.TELEGRAM_OWNER_ID)) {
+      if (!await isAllowedSession(request, env)) {
         return json({ error: "Требуется вход в AI Studio." }, 401);
       }
       let body;
