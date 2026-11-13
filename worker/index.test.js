@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import worker, { assertWorkflowExecutionSucceeded, extractCohereResponseText, getSessionIdentity, hasAuthProvider, normalizeWorkflowTeamSettings, parseCohereChangesResponse } from "./core.js";
+import appWorker from "./index.js";
 
 const env = {
   APP_PASSWORD: "correct-horse",
@@ -1193,4 +1194,33 @@ describe("AI Studio Worker", () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it("writes a polled task snapshot to KV only when its state actually changes", async () => {
+    const cookie = await getSessionCookie();
+    const jobId = "workflow-job-usage-test";
+    const key = "user:" + env.TELEGRAM_OWNER_ID + ":task:" + jobId;
+    const records = new Map([[key, JSON.stringify({
+      jobId, title: "Проверка KV", createdAt: Date.now(), state: "queued", status: "В очереди"
+    })]]);
+    let puts = 0;
+    const store = {
+      get: async name => records.get(name) || null,
+      put: async (name, value) => { puts++; records.set(name, value); }
+    };
+    const testEnv = {
+      ...env,
+      TASKS: store,
+      AI_STUDIO_WORKFLOW: { get: async () => ({ status: async () => ({ status: "running" }) }) }
+    };
+    const request = () => new Request("https://studio.test/api/execute/" + jobId, { headers: { cookie } });
+
+    const first = await appWorker.fetch(request(), testEnv);
+    assert.equal(first.status, 200);
+    assert.equal(puts, 1, "the queued-to-running transition should be persisted once");
+
+    const second = await appWorker.fetch(request(), testEnv);
+    assert.equal(second.status, 200);
+    assert.equal(puts, 1, "repeated polling of an unchanged state must not write KV again");
+  });
+
 });
