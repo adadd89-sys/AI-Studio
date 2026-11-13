@@ -559,7 +559,7 @@ export default {
           reply = payload?.choices?.[0]?.message?.content || payload?.choices?.[0]?.message?.reasoning_content || "";
         }
         if (!reply.trim()) throw new Error("Агент вернул пустой ответ.");
-        return json({ ok: true, reply: reply.trim(), agent: GEMINI_AGENT_LABELS[agent] || (agent === "qwen" ? "Qwen" : agent === "gemma" ? "Gemma" : "Cohere North"), agentsUsed: [agent], usage: { requests: 1, neurons: null } });
+        return json({ ok: true, reply: reply.trim(), agent, agentLabel: GEMINI_AGENT_LABELS[agent] || (agent === "qwen" ? "Qwen" : agent === "gemma" ? "Gemma" : "Cohere North"), agentsUsed: [agent], usage: { requests: 1, neurons: null } });
       } catch (error) {
         return json({ error: error?.message || "Не удалось получить ответ агента." }, 502);
       }
