@@ -246,6 +246,7 @@ function App() {
   const [showAll, setShowAll] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [taskError, setTaskError] = useState('');
+  const [reviewFailure, setReviewFailure] = useState(null);
   const [lastPlan, setLastPlan] = useState(null);
   const [geminiHealth, setGeminiHealth] = useState(null);
   const [geminiCallStatus, setGeminiCallStatus] = useState(null);
@@ -494,6 +495,7 @@ function App() {
     if (!value || isSubmitting) return;
     setIsSubmitting(true);
     setTaskError('');
+    setReviewFailure(null);
     if (teamSettings.mode === 'chat') {
       setChatLoading(true);
       setChatStatus('Запрос отправлен. Ожидаю ответ модели…');
@@ -561,7 +563,15 @@ function App() {
         if (statusData.status === 'complete') {
           data = statusData.output?.data || null;
           if (!data) { workflowFailed = true; throw new Error('Workflow завершился без результата выполнения.'); }
-          if (statusData.output?.httpStatus >= 400 || data.error) { workflowFailed = true; throw new Error(data.error || 'Команда ИИ не смогла выполнить задачу.'); }
+          if (statusData.output?.httpStatus >= 400 || data.error) {
+            workflowFailed = true;
+            if (data.review) setReviewFailure({
+              summary: data.review.summary || 'Команда ревью обнаружила замечания.',
+              issues: Array.isArray(data.review.issues) ? data.review.issues : [],
+              northReview: data.review.northReview || null
+            });
+            throw new Error(data.error || 'Команда ИИ не смогла выполнить задачу.');
+          }
           completed = true;
           break;
         }
@@ -780,6 +790,13 @@ function App() {
               <div className="composer-footer"><div className="composer-hint"><Sparkles size={14} /> {teamSettings.mode === 'chat' ? "Один агент отвечает без запуска задач" : "Интенсивность " + teamSettings.intensity + "% · активные агенты по настройкам"}</div><button className="primary-button" type="submit" disabled={!task.trim() || isSubmitting}>{isSubmitting ? (teamSettings.mode === 'chat' ? 'Отвечаем…' : 'Команда работает…') : (teamSettings.mode === 'chat' ? 'Отправить' : 'Запустить команду')} <Send size={15} /></button></div>
             </form>
             {taskError && <div className="task-error" role="alert">{taskError}</div>}
+            {reviewFailure && <section className="review-failure-panel" aria-live="polite">
+              <div className="review-failure-heading"><ShieldCheck size={17}/><strong>Подробности проверки команды</strong></div>
+              {reviewFailure.summary && <p className="review-failure-summary">{reviewFailure.summary}</p>}
+              {reviewFailure.issues.length > 0 ? <div className="review-failure-section"><strong>Замечания ревьюеров</strong><ul>{reviewFailure.issues.map((issue, index) => <li key={index}>{typeof issue === 'string' ? issue : (issue.message || issue.description || JSON.stringify(issue))}</li>)}</ul></div> : <p className="review-failure-muted">Сервер не передал список отдельных замечаний.</p>}
+              {reviewFailure.northReview && <div className="review-failure-section"><strong>Cohere North · независимая проверка</strong><p>{reviewFailure.northReview.summary || (reviewFailure.northReview.approved ? 'Одобрено' : 'Не одобрено')}</p>{Array.isArray(reviewFailure.northReview.issues) && reviewFailure.northReview.issues.length > 0 && <ul>{reviewFailure.northReview.issues.map((issue, index) => <li key={index}>{typeof issue === 'string' ? issue : (issue.message || issue.description || JSON.stringify(issue))}</li>)}</ul>}</div>}
+              <p className="review-failure-footnote">Изменения не сохранены в GitHub. Исправления можно запускать после разбора замечаний.</p>
+            </section>}
             {lastPlan && <div className="generated-plan">
               <div className="plan-header"><div><span className="eyebrow">ПЛАН · {lastPlan.model}</span><h3>{lastPlan.summary}</h3></div><div className="plan-model-stack"><span className="plan-model">{lastPlan.model}</span><span className={lastPlan.fallbackUsed ? 'model-route fallback' : 'model-route'}>{lastPlan.fallbackUsed ? 'Резервное переключение' : 'Основная модель'}</span></div></div>
               <div className={lastPlan.fallbackUsed ? 'model-info fallback' : 'model-info'}>{lastPlan.fallbackUsed ? <>Основная модель <strong>{lastPlan.primaryModel}</strong> была недоступна. Ответ получен от резервной модели <strong>{lastPlan.model}</strong>.</> : <>Запрос выполнен основной моделью <strong>{lastPlan.model}</strong>. Резервная модель не потребовалась.</>}</div>
