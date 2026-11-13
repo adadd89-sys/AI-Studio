@@ -708,7 +708,11 @@ describe("AI Studio Worker", () => {
             steps: ["Создать компонент настроек", "Проверить изменения"],
             acceptanceCriteria: ["Экран доступен из навигации"],
             risks: [],
-            questions: []
+            questions: [],
+            assignments: [
+              { agent: "qwen", task: "Создай компонент настроек", allowedPaths: ["src/new-screen.jsx"] },
+              { agent: "north", task: "Подготовь отдельный файл стилей", allowedPaths: ["src/theme.css"] }
+            ]
           }) }] } }]
         }), { status: 200, headers: { "content-type": "application/json" } });
       }
@@ -724,9 +728,20 @@ describe("AI Studio Worker", () => {
       if (target.endsWith("/git/refs") && options.method === "POST") {
         return new Response(JSON.stringify({ ref: "refs/heads/ai-studio/task-test" }), { status: 201 });
       }
-      if (target.endsWith("/contents/src/new-screen.jsx") && options.method === "PUT") {
+      if (target.includes("openrouter.ai/api/v1/chat/completions")) {
+        const payload = JSON.parse(options.body);
+        const system = payload.messages?.[0]?.content || "";
+        const result = system.includes("основной разработчик")
+          ? { summary: "North подготовил стили", changes: [{ path: "src/theme.css", content: ".settings { display: grid; }", reason: "Стили настроек" }] }
+          : { approved: true, summary: "North проверил изменения.", issues: [] };
+        return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(result) } }] }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (target.includes("/contents/") && options.method === "PUT") {
         writes.push(JSON.parse(options.body));
         return new Response(JSON.stringify({ commit: { sha: "c".repeat(40) } }), { status: 201 });
+      }
+      if (target.endsWith("/pulls") && options.method === "POST") {
+        return new Response(JSON.stringify({ number: 41, html_url: "https://github.com/adadd89-sys/AI-Studio/pull/41", state: "open" }), { status: 201 });
       }
       throw new Error("Unexpected mocked request: " + target);
     };
@@ -749,16 +764,20 @@ describe("AI Studio Worker", () => {
         method: "POST",
         headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
         body: JSON.stringify({ task: "Добавь экран настроек" })
-      }), { ...env, AI: ai, GITHUB_TOKEN: "test-token", GEMINI_MODEL: "gemini-4-hydrogen" });
+      }), { ...env, AI: ai, GITHUB_TOKEN: "test-token", GEMINI_MODEL: "gemini-4-hydrogen", OPENROUTER_API_KEY: "test-openrouter" });
       assert.equal(response.status, 200);
       const result = await response.json();
       assert.equal(result.ok, true);
       assert.match(result.branch, /^ai-studio\/task-/);
-      assert.deepEqual(result.filesChanged.map(file => file.path), ["src/new-screen.jsx"]);
+      assert.deepEqual(result.filesChanged.map(file => file.path).sort(), ["src/new-screen.jsx", "src/theme.css"]);
       assert.equal(result.gemmaReview, "Gemma: Изменения корректны.");
-      assert.equal(writes.length, 1);
-      assert.equal(writes[0].branch, result.branch);
-      assert.equal(writes[0].content, btoa("export default function Settings() { return <main>Settings</main>; }"));
+      assert.deepEqual(result.delegation.map(item => item.agent).sort(), ["north", "qwen"]);
+      assert.equal(result.pullRequest.number, 41);
+      assert.equal(result.pullRequest.url, "https://github.com/adadd89-sys/AI-Studio/pull/41");
+      assert.equal(writes.length, 2);
+      assert.ok(writes.every(write => write.branch === result.branch));
+      assert.ok(writes.some(write => write.content === btoa("export default function Settings() { return <main>Settings</main>; }")));
+      assert.ok(writes.some(write => write.content === btoa(".settings { display: grid; }")));
     } finally {
       globalThis.fetch = originalFetch;
     }
