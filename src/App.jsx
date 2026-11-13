@@ -704,7 +704,7 @@ function App() {
               <div className="composer-footer"><div className="composer-hint"><Sparkles size={14}/> Один агент отвечает без запуска задач</div><button className="primary-button" type="submit" disabled={!task.trim() || chatLoading}>{chatLoading ? 'Отвечаем…' : 'Отправить'} <Send size={15}/></button></div>
             </form>
             {taskError && <div className="task-error" role="alert">{taskError}</div>}
-          </section> : {active === 'Проекты' ? <section className="projects-page">
+          </section> : active === 'Проекты' ? <section className="projects-page">
             <div className="section-heading"><div><div className="eyebrow">ОБЩИЕ ДАННЫЕ · TELEGRAM CLOUD</div><h2>{detailProjectId ? 'Карточка проекта' : 'Мои проекты'}</h2></div><FolderKanban size={22}/></div>
             {detailProjectId ? (() => {
               const project = projects.find(item => item.id === detailProjectId);
