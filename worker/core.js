@@ -87,7 +87,7 @@ async function createSession(secret, identity = {}) {
   return payload + "." + signature;
 }
 
-export async function getSessionIdentity(request, secret) {
+export async function getSessionIdentity(request, secret, ownerId) {
   if (!secret) return null;
   const cookie = request.headers.get("cookie") || "";
   const token = cookie.split(";").map(part => part.trim())
@@ -102,14 +102,15 @@ export async function getSessionIdentity(request, secret) {
     if (!valid) return null;
     const data = JSON.parse(new TextDecoder().decode(fromBase64Url(payload)));
     if (!Number.isInteger(data.exp) || data.exp <= Math.floor(Date.now() / 1000)) return null;
-    return { telegramUserId: Number.isSafeInteger(data.telegramUserId) ? data.telegramUserId : null };
+    if (!Number.isSafeInteger(data.telegramUserId)) return null;
+    if (ownerId !== undefined && String(data.telegramUserId) !== String(ownerId)) return null;
+    return { telegramUserId: data.telegramUserId };
   } catch { return null; }
 }
 
 export async function isValidSession(request, secret, ownerId) {
   if (!/^\\d{1,20}$/.test(String(ownerId || ""))) return false;
-  const identity = await getSessionIdentity(request, secret);
-  return Boolean(identity?.telegramUserId && String(identity.telegramUserId) === String(ownerId));
+  return Boolean(await getSessionIdentity(request, secret, ownerId));
 }
 
 function hasSameOrigin(request) {
@@ -570,7 +571,7 @@ export default {
       const internalRequest = new Request("https://studio.internal/api/execute", {
         method: "POST",
         headers: { "content-type": "application/json", "origin": "https://studio.internal",
-          "cookie": SESSION_COOKIE + "=" + await createSession(env.SESSION_SECRET) },
+          "cookie": SESSION_COOKIE + "=" + await createSession(env.SESSION_SECRET, { telegramUserId: Number(env.TELEGRAM_OWNER_ID) }) },
         body: JSON.stringify({ task, teamSettings })
       });
       return this.fetch(internalRequest, env);
@@ -1013,7 +1014,7 @@ export default {
 
     if (url.pathname === "/api/plan" && request.method === "POST") {
       if (!hasAuthProvider(env)) {
-        return json({ error: "Авторизация ещё не настроена. Добавьте APP_PASSWORD и SESSION_SECRET в секреты Worker." }, 503);
+        return json({ error: "Закрытый доступ не настроен. Добавьте TELEGRAM_BOT_TOKEN, TELEGRAM_OWNER_ID и SESSION_SECRET в секреты Worker." }, 503);
       }
       if (!await isValidSession(request, env.SESSION_SECRET, env.TELEGRAM_OWNER_ID)) {
         return json({ error: "Требуется вход в AI Studio." }, 401);
