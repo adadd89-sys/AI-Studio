@@ -701,7 +701,7 @@ function App() {
                 {item.jobId && ['queued','running'].includes(item.state) && <small className="process-hint">ID: {item.jobId} · Статус обновляется автоматически</small>}
               </article>)}</div>}
             <p className="settings-note">История синхронизируется с сервером для Telegram-аккаунта; локальная копия помогает сохранить доступ при временной недоступности сети.</p>
-          </section> : active === 'Код и файлы' ? <CodeWorkspace /> : active === 'Настройки' ? <section className="settings-page">
+          </section> : active === 'Код и файлы' ? <CodeWorkspace /> : (active === 'Настройки' || active === 'Команда ИИ') ? <section className="settings-page">
             <div className="section-heading"><div><div className="eyebrow">УПРАВЛЕНИЕ КОМАНДОЙ</div><h2>Настройки AI Studio</h2></div><Gauge size={22}/></div>
             <div className="settings-card"><div className="settings-title"><div><strong>Интенсивность работы</strong><span>Влияет на длину ответов и глубину проверки. Число вызовов зависит от включённых агентов.</span></div><b>{teamSettings.intensity}%</b></div>
               <input className="intensity-slider" type="range" min="0" max="100" step="5" value={teamSettings.intensity} onChange={event => updateTeamSetting('intensity', Number(event.target.value))} disabled={teamSettings.mode === 'max'}/>
