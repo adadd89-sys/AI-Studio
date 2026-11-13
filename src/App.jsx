@@ -234,7 +234,7 @@ function readTeamSettings() {
 
 function App() {
   const [active, setActive] = useState('Обзор');
-  const [ambientEnabled, setAmbientEnabled] = useState(false);
+  const [ambientEnabled, setAmbientEnabled] = useState(true);
   const [task, setTask] = useState('');
   const [tasks, setTasks] = useState(() => {
     try { return JSON.parse(localStorage.getItem('ai-studio-tasks') || '[]').slice(0, 100); } catch { return []; }
@@ -332,7 +332,15 @@ function App() {
     lfo.connect(lfoGain).connect(pad.gain);
     lfo.start();
 
+    // Try autoplay on launch; mobile browsers may require the first user gesture.
     audio.resume().catch(() => {});
+    const unlockAudio = () => {
+      if (audio.state === 'suspended') audio.resume().catch(() => {});
+      document.removeEventListener('pointerdown', unlockAudio);
+      document.removeEventListener('keydown', unlockAudio);
+    };
+    document.addEventListener('pointerdown', unlockAudio, { once: true, passive: true });
+    document.addEventListener('keydown', unlockAudio, { once: true });
     const handleVisibility = () => {
       if (document.hidden) audio.suspend().catch(() => {});
       else audio.resume().catch(() => {});
