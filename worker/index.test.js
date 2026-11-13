@@ -873,7 +873,7 @@ describe("AI Studio Worker", () => {
     const requestedModels = [];
     globalThis.fetch = async url => {
       const target = String(url);
-      const model = target.match(/models\\/([^:]+):generateContent/)?.[1];
+      const model = target.match(/models\/([^:]+):generateContent/)?.[1];
       requestedModels.push(model);
       if (model !== "gemini-3.6-flash") {
         return new Response(JSON.stringify({ error: { message: "This model is currently experiencing high demand." } }), { status: 503 });
