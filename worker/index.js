@@ -1,15 +1,31 @@
-import worker, { hasAuthProvider, isValidSession } from "./core.js";
+import worker, { getSessionIdentity, hasAuthProvider, isValidSession } from "./core.js";
 import { AIStudioWorkflow } from "./workflow.js";
 
 export { AIStudioWorkflow };
 
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" };
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: JSON_HEADERS });
+const TASK_TTL_SECONDS = 60 * 60 * 24 * 90;
 
 async function authenticated(request, env) {
   if (!hasAuthProvider(env)) return json({ error: "Авторизация AI Studio не настроена." }, 503);
   if (!await isValidSession(request, env.SESSION_SECRET)) return json({ error: "Требуется вход в AI Studio." }, 401);
   return null;
+}
+
+async function taskOwner(request, env) {
+  const identity = await getSessionIdentity(request, env.SESSION_SECRET);
+  return identity?.telegramUserId ?? null;
+}
+
+function taskKey(userId, jobId) {
+  return "user:" + userId + ":task:" + jobId;
+}
+
+async function readTask(env, userId, jobId) {
+  const raw = await env.TASKS.get(taskKey(userId, jobId));
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return null; }
 }
 
 export default {
