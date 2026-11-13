@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import worker, { hasAuthProvider } from "./core.js";
+import worker, { assertWorkflowExecutionSucceeded, hasAuthProvider } from "./core.js";
 
 const env = { APP_PASSWORD: "correct-horse", SESSION_SECRET: "test-session-secret", GEMINI_API_KEY: "test-key" };
 
@@ -26,6 +26,22 @@ function planRequest(cookie, body = { task: "Создай сайт" }) {
 }
 
 describe("AI Studio Worker", () => {
+  it("marks workflow execution as failed when the internal worker returns an error", () => {
+    assert.throws(
+      () => assertWorkflowExecutionSucceeded(502, { error: "Qwen вернул пустой ответ." }),
+      /Qwen вернул пустой ответ/
+    );
+    assert.throws(
+      () => assertWorkflowExecutionSucceeded(200, { error: "Частичные изменения не сохранены." }),
+      /Частичные изменения не сохранены/
+    );
+  });
+
+  it("preserves successful workflow output for status polling", () => {
+    const result = assertWorkflowExecutionSucceeded(200, { ok: true, branch: "ai-studio/task-1" });
+    assert.deepEqual(result, { httpStatus: 200, data: { ok: true, branch: "ai-studio/task-1" } });
+  });
+
   it("accepts Telegram as an authentication provider without APP_PASSWORD", () => {
     assert.equal(hasAuthProvider({ SESSION_SECRET: "secret", TELEGRAM_BOT_TOKEN: "bot-token", APP_PASSWORD: "" }), true);
     assert.equal(hasAuthProvider({ SESSION_SECRET: "secret", APP_PASSWORD: "" }), false);
