@@ -1,4 +1,4 @@
-import worker, { getSessionIdentity, hasAuthProvider, isValidSession } from "./core.js";
+import worker, { getSessionIdentity, hasAuthProvider, isValidSession, normalizeWorkflowTeamSettings } from "./core.js";
 import { AIStudioWorkflow } from "./workflow.js";
 
 export { AIStudioWorkflow };
@@ -137,19 +137,11 @@ export default {
       const body = await request.json().catch(() => null);
       const task = typeof body?.task === "string" ? body.task.trim() : "";
       const rawSettings = body?.teamSettings && typeof body.teamSettings === "object" ? body.teamSettings : {};
-      const teamSettings = {
-        intensity: rawSettings.mode === "max" ? 100 : Math.max(0, Math.min(100, Number.isFinite(Number(rawSettings.intensity)) ? Math.round(Number(rawSettings.intensity) / 5) * 5 : 60)),
-        mode: ["chat", "normal", "max"].includes(rawSettings.mode) ? rawSettings.mode : "normal",
-        agents: {
-          gemini: rawSettings.agents?.gemini !== false,
-          qwen: rawSettings.agents?.qwen !== false,
-          gemma: rawSettings.agents?.gemma !== false,
-          north: rawSettings.agents?.north === true
-        }
-      };
+      const teamSettings = normalizeWorkflowTeamSettings(rawSettings);
       if (teamSettings.mode === "chat") return json({ error: "Для режима общения используйте отдельный маршрут /api/chat." }, 400);
       if (!teamSettings.agents.qwen && !teamSettings.agents.north) return json({ error: "Включите Qwen или Cohere North Mini Code — нужен хотя бы один разработчик." }, 400);
-      if (teamSettings.agents.gemini && !env.GEMINI_API_KEY) return json({ error: "Gemini включён, но GEMINI_API_KEY не настроен." }, 503);
+      const geminiEnabled = ["gemini", "gemini38", "gemini36", "geminiLite", "gemini31Lite"].some(key => teamSettings.agents[key]);
+      if (geminiEnabled && !env.GEMINI_API_KEY) return json({ error: "Gemini включён, но GEMINI_API_KEY не настроен." }, 503);
       if ((teamSettings.agents.qwen || (teamSettings.agents.gemma && teamSettings.intensity >= 50)) && !env.AI) return json({ error: "Для включённых Qwen/Gemma требуется Cloudflare Workers AI." }, 503);
       if (teamSettings.agents.north && !env.OPENROUTER_API_KEY) return json({ error: "Cohere North Mini Code включён, но OPENROUTER_API_KEY ещё не добавлен в секреты Cloudflare." }, 503);
       if (!task) return json({ error: "Опишите задачу." }, 400);

@@ -11,6 +11,7 @@ const navigation = [
   { label: 'Чат с ИИ', icon: MessageCircle },
   { label: 'Проекты', icon: FolderKanban },
   { label: 'Команда ИИ', icon: Users },
+  { label: 'Пользователи', icon: Users },
   { label: 'Процессы', icon: Workflow },
   { label: 'Код и файлы', icon: Code2 },
   { label: 'Расход ресурсов', icon: BarChart3 }
@@ -257,6 +258,13 @@ function App() {
   const [geminiHealth, setGeminiHealth] = useState(null);
   const [geminiCallStatus, setGeminiCallStatus] = useState(null);
   const [authState, setAuthState] = useState('checking');
+  const [sessionRole, setSessionRole] = useState(null);
+  const [sessionUserId, setSessionUserId] = useState(null);
+  const [chatLoadedForUser, setChatLoadedForUser] = useState('');
+  const [userRows, setUserRows] = useState([]);
+  const [newTelegramUserId, setNewTelegramUserId] = useState('');
+  const [usersError, setUsersError] = useState('');
+  const [usersBusy, setUsersBusy] = useState(false);
   const [splashDone, setSplashDone] = useState(false);
   const [splashProgress, setSplashProgress] = useState(0);
   const [loginPassword, setLoginPassword] = useState('');
@@ -272,7 +280,7 @@ function App() {
     try { return JSON.parse(localStorage.getItem('ai-studio-usage-events') || '[]'); } catch { return []; }
   });
   const [usagePeriod, setUsagePeriod] = useState('today');
-  const [chatMessages, setChatMessages] = useState(() => { try { return JSON.parse(localStorage.getItem('ai-studio-chat') || '[]').slice(-24); } catch { return []; } });
+  const [chatMessages, setChatMessages] = useState([]);
   const [chatLoading, setChatLoading] = useState(false);
   const [chatStatus, setChatStatus] = useState('');
   const [chatGithubResult, setChatGithubResult] = useState(null);
@@ -424,8 +432,17 @@ function App() {
   }, [tasks]);
 
   useEffect(() => {
-    localStorage.setItem('ai-studio-chat', JSON.stringify(chatMessages.slice(-24)));
-  }, [chatMessages]);
+    if (!sessionUserId) return;
+    setChatLoadedForUser('');
+    try { setChatMessages(JSON.parse(localStorage.getItem('ai-studio-chat:' + sessionUserId) || '[]').slice(-24)); }
+    catch { setChatMessages([]); }
+    setChatLoadedForUser(sessionUserId);
+  }, [sessionUserId]);
+
+  useEffect(() => {
+    if (!sessionUserId || chatLoadedForUser !== sessionUserId) return;
+    localStorage.setItem('ai-studio-chat:' + sessionUserId, JSON.stringify(chatMessages.slice(-24)));
+  }, [chatMessages, sessionUserId, chatLoadedForUser]);
 
   useEffect(() => {
     const thread = chatThreadRef.current;
@@ -577,18 +594,58 @@ function App() {
     ]).then(async ([health, session]) => {
       if (!active) return;
       setGeminiHealth(health);
-      if (session.authenticated) { setAuthState('authenticated'); return; }
+      if (session.authenticated) {
+        const role = session.role || (session.isOwner ? 'owner' : 'user');
+        setSessionRole(role); setSessionUserId(String(session.telegramUserId || ''));
+        if (role !== 'owner') { setActive('Чат с ИИ'); setTeamSettings(current => ({ ...current, mode: 'chat' })); }
+        setAuthState('authenticated'); return;
+      }
       const telegram = window.Telegram?.WebApp;
       if (telegram?.initData && health.telegramAuthConfigured) {
         try {
           const response = await fetch('/api/telegram-login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ initData: telegram.initData }) });
-          if (response.ok) { if (active) setAuthState('authenticated'); return; }
+          if (response.ok) {
+            const refreshed = await fetch('/api/session').then(result => result.json());
+            if (active) {
+              const role = refreshed.role || (refreshed.isOwner ? 'owner' : 'user');
+              setSessionRole(role); setSessionUserId(String(refreshed.telegramUserId || ''));
+              if (role !== 'owner') { setActive('Чат с ИИ'); setTeamSettings(current => ({ ...current, mode: 'chat' })); }
+              setAuthState('authenticated');
+            }
+            return;
+          }
         } catch { /* Fall back to the existing password login. */ }
       }
       if (active) setAuthState(health.passwordAuthConfigured ? 'login' : health.telegramAuthConfigured ? 'error' : 'setup');
     }).catch(() => { if (active) { setGeminiHealth({ ok: false, modelConfigured: false }); setAuthState('error'); } });
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    if (authState !== 'authenticated' || sessionRole !== 'owner') return;
+    let cancelled = false;
+    fetch('/api/users').then(async response => {
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Не удалось загрузить пользователей.');
+      if (!cancelled) setUserRows(data.users || []);
+    }).catch(error => { if (!cancelled) setUsersError(error.message); });
+    return () => { cancelled = true; };
+  }, [authState, sessionRole]);
+
+  async function updateUserAccess(method, telegramUserId) {
+    setUsersBusy(true); setUsersError('');
+    try {
+      const response = await fetch('/api/users', {
+        method, headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ telegramUserId })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Не удалось изменить доступ.');
+      setUserRows(data.users || []);
+      if (method === 'POST') setNewTelegramUserId('');
+    } catch (error) { setUsersError(error.message); }
+    finally { setUsersBusy(false); }
+  }
 
   const greeting = useMemo(() => new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long' }).format(new Date()), []);
 
@@ -687,7 +744,13 @@ function App() {
             : item));
           await new Promise(resolve => setTimeout(resolve, 24));
         }
-        setChatStatus('Ответ готов · ' + (agentLabel || 'ИИ'));
+        const usedAgentNames = (data.agentsUsed || [data.agent]).map(key => ({
+          gemini: 'Gemini 4 Hydrogen', gemini38: 'Gemini 3.8', gemini36: 'Gemini 3.6',
+          geminiLite: 'Gemini Flash-Lite', gemini31Lite: 'Gemini 3.1 Flash-Lite',
+          qwen: 'Qwen', gemma: 'Gemma', north: 'Cohere North'
+        }[key] || key));
+        setChatStatus('Ответ готов · ' + usedAgentNames.join(' + ') +
+          (data.consultationFailures ? ' · не ответили: ' + data.consultationFailures : ''));
         setUsageEvents(current => [{ id: Date.now(), at: new Date().toISOString(), mode: 'chat', intensity: teamSettings.intensity, agents: data.agentsUsed || [data.agent], requests: data.usage?.requests ?? 1, neurons: null, task: value.slice(0,160) }, ...current].slice(0,300));
         setReviewStatus(data.github ? 'Gemini подготовил изменения в GitHub и открыл Pull Request #' + data.github.number + '.' : 'Ответ получен от ' + agentLabel + '.');
       } catch (error) {
@@ -853,7 +916,7 @@ function App() {
         </div>
         <div className="nav-caption">РАБОЧЕЕ ПРОСТРАНСТВО</div>
         <nav className="navigation">
-          {navigation.map(item => {
+          {navigation.filter(item => sessionRole === 'owner' || item.label === 'Чат с ИИ').map(item => {
             const Icon = item.icon;
             return <button key={item.label} className={active === item.label ? 'nav-item active' : 'nav-item'} onClick={() => { setActive(item.label); updateTeamSetting('mode', item.label === 'Чат с ИИ' ? 'chat' : 'normal'); }}>
               <Icon size={17} /><span>{item.label}</span>{item.label === 'Процессы' && tasks.length > 0 && <i>{tasks.length}</i>}
@@ -861,25 +924,42 @@ function App() {
           })}
         </nav>
         <div className="sidebar-bottom">
-          <button className="nav-item" onClick={() => { setActive('Настройки'); updateTeamSetting('mode','normal'); }}><Settings2 size={17} /><span>Настройки</span></button>
-          <div className="github-card">
+          {sessionRole === 'owner' && <button className="nav-item" onClick={() => { setActive('Настройки'); updateTeamSetting('mode','normal'); }}><Settings2 size={17} /><span>Настройки</span></button>}
+          {sessionRole === 'owner' && <div className="github-card">
             <div className="github-top"><GitBranch size={15} /><span>GitHub workspace</span><span className="online-dot" /></div>
             <strong>adadd89-sys / AI-Studio</strong>
             <small>Ветка main</small>
-          </div>
-          <div className="profile"><div className="profile-avatar">Р</div><div><strong>Руководитель</strong><span>Владелец студии</span></div><ChevronDown size={15} /></div>
+          </div>}
+          <div className="profile"><div className="profile-avatar">{sessionRole === 'owner' ? 'Р' : 'У'}</div><div><strong>{sessionRole === 'owner' ? 'Руководитель' : 'Пользователь'}</strong><span>{sessionRole === 'owner' ? 'Владелец студии' : 'Ограниченный доступ'}</span></div></div>
         </div>
       </aside>
 
       <main className={active === 'Чат с ИИ' ? "main-area chat-active" : "main-area"}>
         <header className="topbar">
           <div className="breadcrumbs"><span>AI Studio</span><ChevronRight size={14} /><strong>{title}</strong></div>
-          <div className="topbar-right"><span className="date-label">{greeting}</span><button className={"ambient-toggle " + (ambientEnabled ? "is-on" : "")} type="button" aria-pressed={ambientEnabled} aria-label={ambientEnabled ? "Выключить космический фон" : "Включить космический фон"} title={ambientEnabled ? "Выключить космический фон" : "Включить космический фон"} onClick={() => setAmbientEnabled(value => !value)}>{ambientEnabled ? <Volume2 size={16}/> : <VolumeX size={16}/>}<span>{ambientEnabled ? "Звук включён" : "Звук"}</span></button><button className="icon-button" aria-label="Помощь"><CircleHelp size={17} /></button><div className="top-avatar">Р</div></div>
+          <div className="topbar-right"><span className="date-label">{greeting}</span><button className={"ambient-toggle " + (ambientEnabled ? "is-on" : "")} type="button" aria-pressed={ambientEnabled} aria-label={ambientEnabled ? "Выключить космический фон" : "Включить космический фон"} title={ambientEnabled ? "Выключить космический фон" : "Включить космический фон"} onClick={() => setAmbientEnabled(value => !value)}>{ambientEnabled ? <Volume2 size={16}/> : <VolumeX size={16}/>}<span>{ambientEnabled ? "Звук включён" : "Звук"}</span></button><button className="icon-button" aria-label="Помощь"><CircleHelp size={17} /></button><div className="top-avatar">{sessionRole === 'owner' ? 'Р' : 'У'}</div></div>
         </header>
 
         <div className={active === 'Чат с ИИ' ? "page-content chat-content" : "page-content"}>
+          {active === 'Пользователи' && sessionRole === 'owner' ? <section className="settings-page">
+            <div className="section-heading"><div><div className="eyebrow">ДОСТУП К TELEGRAM MINI APP</div><h2>Пользователи</h2></div><Users size={22}/></div>
+            <div className="settings-card">
+              <div className="settings-title"><div><strong>Добавить пользователя</strong><span>Укажите числовой Telegram ID. Пользователь сможет войти через Telegram и общаться с ИИ, но не получит доступ к коду или GitHub.</span></div></div>
+              <form className="project-edit-form" onSubmit={event => { event.preventDefault(); updateUserAccess('POST', newTelegramUserId.trim()); }}>
+                <label>Telegram ID<input inputMode="numeric" pattern="[0-9]{1,20}" value={newTelegramUserId} onChange={event => setNewTelegramUserId(event.target.value.replace(/\D/g, '').slice(0,20))} placeholder="Например, 123456789" required /></label>
+                <button className="primary-button" type="submit" disabled={usersBusy || !/^\d{1,20}$/.test(newTelegramUserId)}>{usersBusy ? 'Сохраняем…' : 'Выдать доступ'} <Plus size={15}/></button>
+              </form>
+              {usersError && <div className="task-error" role="alert">{usersError}</div>}
+            </div>
+            <div className="settings-card">
+              <div className="settings-title"><div><strong>Разрешённые аккаунты</strong><span>{userRows.length} пользователей</span></div></div>
+              {userRows.length ? <div className="process-list">{userRows.map(user => <article className="process-card" key={user.telegramUserId}>
+                <div className="process-card-heading"><div><strong>Telegram ID: {user.telegramUserId}</strong><small>Роль: обычный пользователь · Добавлен {user.addedAt ? new Date(user.addedAt).toLocaleString('ru-RU') : 'ранее'}</small></div><button className="subtle-button" type="button" disabled={usersBusy} onClick={() => updateUserAccess('DELETE', user.telegramUserId)}>Отозвать доступ</button></div>
+              </article>)}</div> : <p className="settings-note">Пока никто не добавлен.</p>}
+            </div>
+          </section> : null}
           {active === 'Чат с ИИ' ? <section className="task-panel chat-mode chat-page">
-            <div className="chat-page-heading"><div><div className="eyebrow"><MessageCircle size={14}/> ЛИЧНЫЙ ДИАЛОГ</div><h1>Чат с ИИ</h1><p>Общение, анализ проекта и работа с GitHub через Gemini</p></div><div className="chat-agent-indicator"><span className="working-pulse"/>{teamSettings.agents.gemini ? 'Gemini · основной агент' : teamSettings.agents.qwen ? 'Qwen · основной агент' : 'Активный агент'}</div></div>
+            <div className="chat-page-heading"><div><div className="eyebrow"><MessageCircle size={14}/> ЛИЧНЫЙ ДИАЛОГ</div><h1>Чат с ИИ</h1><p>{sessionRole === 'owner' ? 'Общение, анализ проекта и работа с GitHub через Gemini' : 'Личный диалог с командой ИИ'}</p></div><div className="chat-agent-indicator"><span className="working-pulse"/>{teamSettings.agents.gemini ? 'Gemini · основной агент' : teamSettings.agents.qwen ? 'Qwen · основной агент' : 'Активный агент'}</div></div>
             <div className="chat-thread" ref={chatThreadRef} aria-live="polite">
               {chatMessages.length === 0 && <div className="chat-empty"><div className="chat-empty-orb"><BrainCircuit size={25}/></div><strong>С чего начнём?</strong><span>Напишите сообщение — ИИ ответит прямо здесь.</span></div>}
               {chatMessages.map((item,index) => <div key={index} className={'chat-message ' + item.role}><span>{item.role === 'user' ? 'Вы' : item.agent || 'AI Studio'}</span><p>{item.content || (item.role === 'assistant' ? <span className="typing-dots"><i/><i/><i/></span> : '')}</p></div>)}
@@ -1013,8 +1093,9 @@ function App() {
                 <a href={'https://github.com/adadd89-sys/AI-Studio/compare/main...' + executionResult.branch} target="_blank" rel="noreferrer">Посмотреть сравнение с main →</a>
               </div>}
               <div className="review-kit">
-                <div className="review-kit-heading"><strong>Результаты работы команды</strong><span>{(executionResult?.agentsUsed || []).map(key => ({gemini:'Gemini',qwen:'Qwen',gemma:'Gemma',north:'North'}[key] || key)).join(' · ') || 'Нет данных об агентах'}</span></div>
-                <p>{reviewStatus || "Gemini распределяет отдельные задания между разработчиками; Gemma и дополнительные модели выполняют ревью."}</p>
+                <div className="review-kit-heading"><strong>Результаты работы команды</strong><span>{(executionResult?.agentsUsed || []).map(key => ({gemini:'Gemini',gemini38:'Gemini 3.8',gemini36:'Gemini 3.6',geminiLite:'Gemini Lite',gemini31Lite:'Gemini 3.1 Lite',qwen:'Qwen',gemma:'Gemma',north:'North'}[key] || key)).join(' · ') || 'Нет данных об агентах'}</span></div>
+                <p>{reviewStatus || "Gemini распределяет отдельные задания между разработчиками; независимые модели проверяют изменения."}</p>
+                {executionResult && <p className="settings-note">Независимое ревью: {(executionResult.reviewers || []).map(key => ({gemini38:'Gemini 3.8',gemini36:'Gemini 3.6',geminiLite:'Gemini Lite',gemini31Lite:'Gemini 3.1 Lite',gemma:'Gemma',north:'North'}[key] || key)).join(' · ') || 'не запускалось на выбранной интенсивности'}.</p>}
                 <div className="agent-reviews">
                   <div className="agent-review"><strong>Gemma 4 · Cloudflare Workers AI</strong>{gemmaReview ? (gemmaReview.ok ? <p>{gemmaReview.review}</p> : <p className="review-error">{gemmaReview.error}</p>) : executionResult && !executionResult.agentsUsed?.includes('gemma') ? <span>Не запускалась: проверка не требовалась при выбранной интенсивности или не было изменений.</span> : <span>Ожидает проверки…</span>}</div>
                   <div className="agent-review"><strong>{teamSettings.agents.qwen ? "Qwen 3.8 · Cloudflare Workers AI" : "Cohere North Mini Code · OpenRouter"}</strong>{qwenReview ? (qwenReview.ok ? <p>{qwenReview.review}</p> : <p className="review-error">{qwenReview.error}</p>) : <span>Ожидает проверки…</span>}</div>

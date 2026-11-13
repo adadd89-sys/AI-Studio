@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import worker, { assertWorkflowExecutionSucceeded, getSessionIdentity, hasAuthProvider } from "./core.js";
+import worker, { assertWorkflowExecutionSucceeded, getSessionIdentity, hasAuthProvider, normalizeWorkflowTeamSettings } from "./core.js";
 
 const env = {
   APP_PASSWORD: "correct-horse",
@@ -57,6 +57,18 @@ describe("AI Studio Worker", () => {
       () => assertWorkflowExecutionSucceeded(200, { error: "Частичные изменения не сохранены." }),
       /Частичные изменения не сохранены/
     );
+  });
+
+  it("preserves every enabled Gemini reviewer when normalizing workflow settings", () => {
+    const settings = normalizeWorkflowTeamSettings({
+      intensity: 75, mode: "normal",
+      agents: { gemini: true, gemini38: true, gemini36: false, geminiLite: true, gemini31Lite: true, qwen: true, gemma: true, north: true }
+    });
+    assert.deepEqual(settings.agents, {
+      gemini: true, gemini38: true, gemini36: false, geminiLite: true, gemini31Lite: true,
+      qwen: true, gemma: true, north: true
+    });
+    assert.equal(settings.intensity, 75);
   });
 
   it("preserves successful workflow output for status polling", () => {
@@ -166,7 +178,7 @@ describe("AI Studio Worker", () => {
     const response = await worker.fetch(new Request("https://studio.test/api/session", {
       headers: { cookie }
     }), env);
-    assert.deepEqual(await response.json(), { authenticated: true, authConfigured: true, telegramAuthConfigured: true });
+    assert.deepEqual(await response.json(), { authenticated: true, isOwner: true, role: "owner", telegramUserId: 987654321, authConfigured: true, telegramAuthConfigured: true });
   });
 
   it("disables password login even when APP_PASSWORD is configured", async () => {
@@ -176,6 +188,67 @@ describe("AI Studio Worker", () => {
       body: JSON.stringify({ password: env.APP_PASSWORD })
     }), env);
     assert.equal(response.status, 403);
+  });
+
+  it("allows an owner-approved Telegram user to sign in, but blocks repository work", async () => {
+    const ownerCookie = await getSessionCookie();
+    const records = new Map();
+    const store = {
+      get: async key => records.get(key) || null,
+      put: async (key, value) => { records.set(key, value); }
+    };
+    const addResponse = await worker.fetch(new Request("https://studio.test/api/users", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: ownerCookie, origin: "https://studio.test" },
+      body: JSON.stringify({ telegramUserId: "123456789" })
+    }), { ...env, TASKS: store });
+    assert.equal(addResponse.status, 200);
+    assert.equal((await addResponse.json()).users[0].role, "user");
+
+    const initData = await createTelegramInitData(123456789);
+    const loginResponse = await worker.fetch(new Request("https://studio.test/api/telegram-login", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://studio.test" },
+      body: JSON.stringify({ initData })
+    }), { ...env, TASKS: store });
+    assert.equal(loginResponse.status, 200);
+    const cookie = loginResponse.headers.get("set-cookie").split(";")[0];
+
+    const sessionResponse = await worker.fetch(new Request("https://studio.test/api/session", { headers: { cookie } }), { ...env, TASKS: store });
+    assert.deepEqual(await sessionResponse.json(), {
+      authenticated: true, isOwner: false, role: "user", telegramUserId: 123456789, authConfigured: true, telegramAuthConfigured: true
+    });
+
+    const blocked = await worker.fetch(new Request("https://studio.test/api/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+      body: JSON.stringify({ message: "Исправь код в GitHub" })
+    }), { ...env, TASKS: store });
+    assert.equal(blocked.status, 403);
+  });
+
+  it("revokes an invited user's access immediately after removal", async () => {
+    const ownerCookie = await getSessionCookie();
+    const records = new Map([["access:telegram-users", JSON.stringify([
+      { telegramUserId: "123456789", role: "user", active: true }
+    ])]]);
+    const store = { get: async key => records.get(key) || null, put: async (key, value) => records.set(key, value) };
+    const initData = await createTelegramInitData(123456789);
+    const loginResponse = await worker.fetch(new Request("https://studio.test/api/telegram-login", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://studio.test" },
+      body: JSON.stringify({ initData })
+    }), { ...env, TASKS: store });
+    assert.equal(loginResponse.status, 200);
+    const cookie = loginResponse.headers.get("set-cookie").split(";")[0];
+    const revoke = await worker.fetch(new Request("https://studio.test/api/users", {
+      method: "DELETE",
+      headers: { "content-type": "application/json", cookie: ownerCookie, origin: "https://studio.test" },
+      body: JSON.stringify({ telegramUserId: "123456789" })
+    }), { ...env, TASKS: store });
+    assert.equal(revoke.status, 200);
+    const session = await worker.fetch(new Request("https://studio.test/api/session", { headers: { cookie } }), { ...env, TASKS: store });
+    assert.equal((await session.json()).authenticated, false);
   });
 
   it("rejects a valid Telegram signature from a non-owner account", async () => {
@@ -936,6 +1009,9 @@ describe("AI Studio Worker", () => {
       assert.ok(payload.reply.includes("**Gemma:** Gemma замечаний не нашла."));
       assert.deepEqual(new Set(consulted), new Set(["@cf/qwen/qwen3.8-27b", "@cf/google/gemma-4-26b-a4b-it"]));
       assert.equal(consulted.length, 2);
+      assert.deepEqual(new Set(payload.agentsUsed), new Set(["gemini", "qwen", "gemma"]));
+      assert.equal(payload.usage.requests, 3);
+      assert.equal(payload.consultationFailures, 0);
     } finally { globalThis.fetch = originalFetch; }
   });
 

@@ -42,7 +42,15 @@ npm run build
 
 ## Access protection
 
-AI Studio is a private, owner-only Telegram Mini App. The Worker accepts a session only when its signed Telegram user ID matches the configured `TELEGRAM_OWNER_ID`. Password login is disabled. The owner allowlist is enforced by the server on every protected API route; an old password or Telegram session belonging to another account is rejected.
+AI Studio supports an owner account and invited Telegram users. The owner is configured with `TELEGRAM_OWNER_ID`; invited user IDs are stored in the existing Cloudflare KV namespace bound as `TASKS` under the key `access:telegram-users`.
+
+The owner can manage invited accounts in the **Пользователи** section of the app. Add a numeric Telegram user ID to grant access, or revoke it to block the account. The Worker checks the allowlist on every authenticated request. Because Cloudflare KV is eventually consistent, a newly granted or revoked account may take a short time to propagate globally; after propagation, the next request reflects the updated access.
+
+Invited users receive the ordinary-user role:
+- They can use the AI chat.
+- They cannot access GitHub routes, code editing, task execution, or owner settings.
+- Repository/code-editing requests are rejected server-side, even if sent directly to the chat API.
+- Chat history is stored in browser local storage under a key scoped to the Telegram user ID.
 
 Configure these as encrypted Cloudflare Worker secrets:
 
@@ -50,7 +58,7 @@ Configure these as encrypted Cloudflare Worker secrets:
 - `TELEGRAM_OWNER_ID`: your numeric Telegram user ID (not your username).
 - `SESSION_SECRET`: a random secret of at least 32 bytes.
 
-If `TELEGRAM_OWNER_ID` is missing or invalid, authentication fails closed and no account can sign in. Telegram Mini App initData signatures and their 10-minute freshness are verified before the owner ID is checked. Sessions are HttpOnly, Secure, SameSite=Strict, and expire after 7 days. Never commit secrets or send them in chat.
+The Cloudflare KV namespace bound as `TASKS` must be available in the deployed Worker. If it is missing, invited-user management fails closed with a configuration error; the owner account remains available. Telegram Mini App initData signatures and their 10-minute freshness are verified before access is granted. Sessions are HttpOnly, Secure, SameSite=Strict, and expire after 7 days. Never commit secrets or send them in chat.
 
 ## Gemini setup
 
@@ -74,7 +82,9 @@ After authenticating Wrangler with the Cloudflare account:
 npm run deploy
 ```
 
-The Worker serves the built Vite app and handles `/api/*`. The app has built-in password/session protection for the planning API. Keep `APP_PASSWORD`, `SESSION_SECRET`, and `GEMINI_API_KEY` as encrypted Worker secrets. The public static interface and health endpoint remain reachable; only planning and model usage require a valid session.
+The Worker serves the built Vite app and handles `/api/*`. The owner retains GitHub and code-execution privileges; invited Telegram users are restricted to AI chat by server-side authorization.
+
+Dangerous operations such as deleting files or publishing projects must require owner confirmation.
 
 ## Planned next
 
