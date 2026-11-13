@@ -1,4 +1,4 @@
-import worker, { getSessionIdentity, hasAuthProvider, isValidSession } from "./core.js";
+import worker, { getSessionIdentity, hasAuthProvider, isValidSession, normalizeWorkflowTeamSettings } from "./core.js";
 import { AIStudioWorkflow } from "./workflow.js";
 
 export { AIStudioWorkflow };
@@ -137,20 +137,7 @@ export default {
       const body = await request.json().catch(() => null);
       const task = typeof body?.task === "string" ? body.task.trim() : "";
       const rawSettings = body?.teamSettings && typeof body.teamSettings === "object" ? body.teamSettings : {};
-      const teamSettings = {
-        intensity: rawSettings.mode === "max" ? 100 : Math.max(0, Math.min(100, Number.isFinite(Number(rawSettings.intensity)) ? Math.round(Number(rawSettings.intensity) / 5) * 5 : 60)),
-        mode: ["chat", "normal", "max"].includes(rawSettings.mode) ? rawSettings.mode : "normal",
-        agents: {
-          gemini: rawSettings.agents?.gemini !== false,
-          gemini38: rawSettings.agents?.gemini38 === true,
-          gemini36: rawSettings.agents?.gemini36 === true,
-          geminiLite: rawSettings.agents?.geminiLite === true,
-          gemini31Lite: rawSettings.agents?.gemini31Lite === true,
-          qwen: rawSettings.agents?.qwen !== false,
-          gemma: rawSettings.agents?.gemma !== false,
-          north: rawSettings.agents?.north === true
-        }
-      };
+      const teamSettings = normalizeWorkflowTeamSettings(rawSettings);
       if (teamSettings.mode === "chat") return json({ error: "Для режима общения используйте отдельный маршрут /api/chat." }, 400);
       if (!teamSettings.agents.qwen && !teamSettings.agents.north) return json({ error: "Включите Qwen или Cohere North Mini Code — нужен хотя бы один разработчик." }, 400);
       const geminiEnabled = ["gemini", "gemini38", "gemini36", "geminiLite", "gemini31Lite"].some(key => teamSettings.agents[key]);
