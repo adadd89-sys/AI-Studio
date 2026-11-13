@@ -20,6 +20,12 @@
   "ai": {
     "binding": "AI"
   },
+  "kv_namespaces": [
+    {
+      "binding": "TASKS",
+      "id": "ccd64e70c3fb451fabff5861cfe2d9d7"
+    }
+  ],
   "workflows": [
     {
       "name": "ai-studio-workflow",
