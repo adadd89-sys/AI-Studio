@@ -240,6 +240,7 @@ function App() {
     try { return JSON.parse(localStorage.getItem('ai-studio-tasks') || '[]').slice(0, 100); } catch { return []; }
   });
   const pollingJobs = useRef(new Set());
+  const buttonAudioRef = useRef(null);
   const [projects, setProjects] = useState([]);
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [detailProjectId, setDetailProjectId] = useState('');
@@ -357,6 +358,62 @@ function App() {
       }, 1400);
     };
   }, [ambientEnabled]);
+
+  useEffect(() => {
+    // A tiny synthesized neural chime for interface buttons (no external audio assets).
+    const playButtonChime = event => {
+      const button = event.target?.closest?.('button, [role="button"]');
+      if (!button || button.disabled || button.getAttribute('aria-disabled') === 'true') return;
+      try {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) return;
+        let audio = buttonAudioRef.current;
+        if (!audio || audio.state === 'closed') {
+          audio = new AudioContextClass();
+          buttonAudioRef.current = audio;
+        }
+        if (audio.state === 'suspended') audio.resume().catch(() => {});
+        const now = audio.currentTime;
+        const master = audio.createGain();
+        master.gain.setValueAtTime(0.0001, now);
+        master.gain.exponentialRampToValueAtTime(0.075, now + 0.008);
+        master.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+        const filter = audio.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(2600, now);
+        filter.frequency.exponentialRampToValueAtTime(900, now + 0.15);
+        filter.connect(master).connect(audio.destination);
+
+        const fundamental = 620 + Math.random() * 100;
+        [1, 1.504, 2.01].forEach((ratio, index) => {
+          const oscillator = audio.createOscillator();
+          const voice = audio.createGain();
+          oscillator.type = index === 2 ? 'sine' : 'triangle';
+          oscillator.frequency.setValueAtTime(fundamental * ratio, now);
+          oscillator.frequency.exponentialRampToValueAtTime(fundamental * ratio * 0.72, now + 0.14);
+          voice.gain.setValueAtTime(index === 0 ? 0.65 : index === 1 ? 0.2 : 0.08, now);
+          oscillator.connect(voice).connect(filter);
+          oscillator.start(now);
+          oscillator.stop(now + 0.17);
+        });
+        master.gain.setValueAtTime(0.075, now + 0.008);
+        master.gain.exponentialRampToValueAtTime(0.0001, now + 0.17);
+        window.setTimeout(() => {
+          master.disconnect();
+          filter.disconnect();
+        }, 260);
+      } catch {
+        // Audio is an enhancement; never interrupt button actions.
+      }
+    };
+
+    document.addEventListener('click', playButtonChime, true);
+    return () => {
+      document.removeEventListener('click', playButtonChime, true);
+      buttonAudioRef.current?.close().catch(() => {});
+      buttonAudioRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('ai-studio-team-settings', JSON.stringify(teamSettings));
