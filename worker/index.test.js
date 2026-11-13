@@ -2,13 +2,35 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import worker, { assertWorkflowExecutionSucceeded, getSessionIdentity, hasAuthProvider } from "./core.js";
 
-const env = { APP_PASSWORD: "correct-horse", SESSION_SECRET: "test-session-secret", GEMINI_API_KEY: "test-key" };
+const env = {
+  APP_PASSWORD: "correct-horse",
+  SESSION_SECRET: "test-session-secret",
+  GEMINI_API_KEY: "test-key",
+  TELEGRAM_BOT_TOKEN: "123456:telegram-test-token",
+  TELEGRAM_OWNER_ID: "987654321"
+};
+
+async function createTelegramInitData(userId, botToken = env.TELEGRAM_BOT_TOKEN, authDate = Math.floor(Date.now() / 1000)) {
+  const entries = [
+    ["auth_date", String(authDate)],
+    ["query_id", "AAE-test-query"],
+    ["user", JSON.stringify({ id: userId, first_name: "Test" })]
+  ];
+  const checkString = [...entries].sort(([left], [right]) => left.localeCompare(right)).map(([key, value]) => key + "=" + value).join("\\n");
+  const webAppKey = await crypto.subtle.importKey("raw", new TextEncoder().encode("WebAppData"), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const secret = await crypto.subtle.sign("HMAC", webAppKey, new TextEncoder().encode(botToken));
+  const validationKey = await crypto.subtle.importKey("raw", secret, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const digest = new Uint8Array(await crypto.subtle.sign("HMAC", validationKey, new TextEncoder().encode(checkString)));
+  const hash = [...digest].map(byte => byte.toString(16).padStart(2, "0")).join("");
+  return new URLSearchParams([...entries, ["hash", hash]]).toString();
+}
 
 async function getSessionCookie() {
-  const response = await worker.fetch(new Request("https://studio.test/api/login", {
+  const initData = await createTelegramInitData(Number(env.TELEGRAM_OWNER_ID));
+  const response = await worker.fetch(new Request("https://studio.test/api/telegram-login", {
     method: "POST",
     headers: { "content-type": "application/json", origin: "https://studio.test" },
-    body: JSON.stringify({ password: env.APP_PASSWORD })
+    body: JSON.stringify({ initData })
   }), env);
   assert.equal(response.status, 200);
   return response.headers.get("set-cookie").split(";")[0];
@@ -43,8 +65,9 @@ describe("AI Studio Worker", () => {
   });
 
   it("accepts Telegram as an authentication provider without APP_PASSWORD", () => {
-    assert.equal(hasAuthProvider({ SESSION_SECRET: "secret", TELEGRAM_BOT_TOKEN: "bot-token", APP_PASSWORD: "" }), true);
-    assert.equal(hasAuthProvider({ SESSION_SECRET: "secret", APP_PASSWORD: "" }), false);
+    assert.equal(hasAuthProvider({ SESSION_SECRET: "secret", TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_OWNER_ID: "123456789", APP_PASSWORD: "" }), true);
+    assert.equal(hasAuthProvider({ SESSION_SECRET: "secret", TELEGRAM_BOT_TOKEN: "bot-token", APP_PASSWORD: "" }), false);
+    assert.equal(hasAuthProvider({ SESSION_SECRET: "secret", APP_PASSWORD: "password" }), false);
   });
   it("returns health status without exposing secrets", async () => {
     const response = await worker.fetch(new Request("https://studio.test/api/health"), {});
@@ -86,7 +109,7 @@ describe("AI Studio Worker", () => {
       method: "POST",
       headers: { "content-type": "application/json", origin: "https://studio.test" },
       body: JSON.stringify({ initData })
-    }), { SESSION_SECRET: env.SESSION_SECRET, TELEGRAM_BOT_TOKEN: botToken });
+    }), { SESSION_SECRET: env.SESSION_SECRET, TELEGRAM_BOT_TOKEN: botToken, TELEGRAM_OWNER_ID: "987654321" });
     assert.equal(response.status, 200);
     const cookie = response.headers.get("set-cookie").split(";")[0];
     const identity = await getSessionIdentity(new Request("https://studio.test/", { headers: { cookie } }), env.SESSION_SECRET);
@@ -125,7 +148,7 @@ describe("AI Studio Worker", () => {
       method: "POST",
       headers: { "content-type": "application/json", origin: "https://studio.test" },
       body: JSON.stringify({ initData: "auth_date=1&user=%7B%22id%22%3A1%7D&hash=" + "0".repeat(64) })
-    }), { SESSION_SECRET: env.SESSION_SECRET, TELEGRAM_BOT_TOKEN: "test-token" });
+    }), { SESSION_SECRET: env.SESSION_SECRET, TELEGRAM_BOT_TOKEN: "test-token", TELEGRAM_OWNER_ID: "987654321" });
     assert.equal(response.status, 401);
   });
 
@@ -138,21 +161,31 @@ describe("AI Studio Worker", () => {
     assert.equal(response.status, 403);
   });
 
-  it("creates a signed session for the correct password", async () => {
+  it("creates a signed session only for the configured Telegram owner", async () => {
     const cookie = await getSessionCookie();
     const response = await worker.fetch(new Request("https://studio.test/api/session", {
       headers: { cookie }
     }), env);
-    assert.deepEqual(await response.json(), { authenticated: true, authConfigured: true, telegramAuthConfigured: false });
+    assert.deepEqual(await response.json(), { authenticated: true, authConfigured: true, telegramAuthConfigured: true });
   });
 
-  it("rejects an incorrect password", async () => {
+  it("disables password login even when APP_PASSWORD is configured", async () => {
     const response = await worker.fetch(new Request("https://studio.test/api/login", {
       method: "POST",
       headers: { "content-type": "application/json", origin: "https://studio.test" },
-      body: JSON.stringify({ password: "wrong" })
+      body: JSON.stringify({ password: env.APP_PASSWORD })
     }), env);
-    assert.equal(response.status, 401);
+    assert.equal(response.status, 403);
+  });
+
+  it("rejects a valid Telegram signature from a non-owner account", async () => {
+    const initData = await createTelegramInitData(123456789);
+    const response = await worker.fetch(new Request("https://studio.test/api/telegram-login", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://studio.test" },
+      body: JSON.stringify({ initData })
+    }), env);
+    assert.equal(response.status, 403);
   });
 
   it("rejects malformed JSON after authentication", async () => {
@@ -171,7 +204,9 @@ describe("AI Studio Worker", () => {
     const cookie = await getSessionCookie();
     const response = await worker.fetch(planRequest(cookie), {
       APP_PASSWORD: env.APP_PASSWORD,
-      SESSION_SECRET: env.SESSION_SECRET
+      SESSION_SECRET: env.SESSION_SECRET,
+      TELEGRAM_BOT_TOKEN: env.TELEGRAM_BOT_TOKEN,
+      TELEGRAM_OWNER_ID: env.TELEGRAM_OWNER_ID
     });
     assert.equal(response.status, 503);
     assert.match((await response.json()).error, /Gemini пока не подключён/);
