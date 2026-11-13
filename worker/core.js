@@ -13,16 +13,19 @@ function scaledTokenBudget(intensity, minimum, maximum) {
 async function fetchGeminiWithRetry(url, options) {
   const retryable = new Set([408, 429, 500, 502, 503, 504]);
   let lastError;
+  let lastResponse = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const response = await fetch(url, options);
       if (response.ok || !retryable.has(response.status)) return response;
+      lastResponse = response;
       lastError = Object.assign(new Error("Gemini API временно недоступен (HTTP " + response.status + ")."), { status: response.status });
     } catch (error) {
       lastError = error;
     }
     if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 250 * (2 ** attempt)));
   }
+  if (lastResponse) return lastResponse;
   throw lastError || new Error("Не удалось связаться с Gemini API.");
 }
 
