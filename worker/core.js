@@ -1086,8 +1086,10 @@ export default {
       try {
         const planResult = teamSettings.agents.gemini ? await callGemini(
           "Ты — руководитель команды разработки AI Studio. Проанализируй задачу и составь конкретный исполнимый план для изменения текущего репозитория AI Studio. " +
-          "Верни только JSON: {\"summary\":\"...\",\"steps\":[\"...\"],\"acceptanceCriteria\":[\"...\"],\"risks\":[\"...\"],\"questions\":[]}. " +
-          "Если данных достаточно, questions должен быть пустым массивом. Не утверждай, что работа уже выполнена. Задача пользователя: " + task
+          "Верни только JSON: {\"summary\":\"...\",\"steps\":[\"...\"],\"acceptanceCriteria\":[\"...\"],\"risks\":[\"...\"],\"questions\":[],"assignments":[{"agent":"qwen|north","task":"отдельное ТЗ","allowedPaths":["src/..."]}]}. " +
+          "Если включены Qwen и North, разложи работу на независимые подзадачи и назначь их обоим; если включён только один разработчик — назначь ему всю работу. " +
+          "Каждая подзадача должна иметь конкретную цель и allowedPaths — точный список файлов, которые разрешено менять. Не назначай Gemma разработчиком: она выполняет независимое ревью. " +
+          "Не допускай пересечения allowedPaths между исполнителями. Если данных достаточно, questions должен быть пустым массивом. Не утверждай, что работа уже выполнена. Задача пользователя: " + task
         ) : { data: { summary: "План сформирован без Gemini в экономном режиме", steps: ["Изучить затронутые файлы", "Подготовить изменения", "Проверить результат"], acceptanceCriteria: [], risks: [], questions: [] }, model: "Локальный план", fallbackUsed: false };
         const plan = planResult.data;
         if (typeof plan.summary !== "string" || !Array.isArray(plan.steps) || !plan.steps.length) {
@@ -1128,7 +1130,7 @@ export default {
           contextFiles.map(file => "===== " + file.path + " =====\n" + file.content).join("\n\n") +
           "\n\nДерево файлов:\n" + repoFiles.join("\n");
         const planText = JSON.stringify(plan);
-        async function askQwen(feedback) {
+        async function askQwen(assignment, feedback = "") {
           executionStage = feedback ? "qwen_repair" : "qwen_implementation";
           usage.requests++;
           if (!usage.agents.includes("qwen")) usage.agents.push("qwen");
@@ -1158,7 +1160,7 @@ export default {
             if (!change || typeof change.path !== "string" || typeof change.content !== "string") throw new Error("Qwen вернул некорректное описание файла.");
             const allowed = change.path === "index.html" || change.path.startsWith("src/") ||
               change.path.startsWith("public/") || change.path.startsWith("worker/");
-            if (!allowed || !validRepoPath(change.path) || change.path.split("/").some(part => part.startsWith(".")) ||
+            if (!allowed || (Array.isArray(assignment.allowedPaths) && assignment.allowedPaths.length && !assignment.allowedPaths.includes(change.path)) || !validRepoPath(change.path) || change.path.split("/").some(part => part.startsWith(".")) ||
                 change.path.includes("node_modules") || change.path.includes("dist/")) {
               throw new Error("Запрошен недопустимый путь файла: " + change.path);
             }
@@ -1167,7 +1169,7 @@ export default {
           return parsed;
         }
 
-        async function askNorth(feedback = "") {
+        async function askNorth(assignment, feedback = "") {
           executionStage = feedback ? "north_repair" : "north_implementation";
           usage.requests++;
           if (!usage.agents.includes("north")) usage.agents.push("north");
@@ -1183,11 +1185,46 @@ export default {
           if (!parsed) throw new Error("Cohere North Mini Code вернула ответ не в формате JSON с массивом changes.");
           if (parsed.changes.length > 6) throw new Error("North предложила изменить больше 6 файлов.");
           for (const change of parsed.changes) {
-            if (!change || typeof change.path !== "string" || typeof change.content !== "string" || !validRepoPath(change.path) || !(change.path === "index.html" || change.path.startsWith("src/") || change.path.startsWith("public/") || change.path.startsWith("worker/")) || change.path.split("/").some(part => part.startsWith(".")) || change.path.includes("node_modules") || change.path.includes("dist/") || change.content.length > 250000) throw new Error("North вернула недопустимое изменение файла.");
+            if (!change || typeof change.path !== "string" || typeof change.content !== "string" || (Array.isArray(assignment.allowedPaths) && assignment.allowedPaths.length && !assignment.allowedPaths.includes(change.path)) || !validRepoPath(change.path) || !(change.path === "index.html" || change.path.startsWith("src/") || change.path.startsWith("public/") || change.path.startsWith("worker/")) || change.path.split("/").some(part => part.startsWith(".")) || change.path.includes("node_modules") || change.path.includes("dist/") || change.content.length > 250000) throw new Error("North вернула недопустимое изменение файла.");
           }
           return parsed;
         }
-        let implementation = teamSettings.agents.qwen ? await askQwen("") : await askNorth("");
+        const availableDevelopers = [];
+        if (teamSettings.agents.qwen) availableDevelopers.push("qwen");
+        if (teamSettings.agents.north) availableDevelopers.push("north");
+        const plannedAssignments = Array.isArray(plan.assignments)
+          ? plan.assignments.filter(item => item && availableDevelopers.includes(item.agent) && typeof item.task === "string" && item.task.trim()).slice(0, availableDevelopers.length)
+          : [];
+        const assignments = plannedAssignments.length
+          ? plannedAssignments.map(item => ({
+              agent: item.agent, task: item.task.trim().slice(0, 3000),
+              allowedPaths: Array.isArray(item.allowedPaths) ? [...new Set(item.allowedPaths.filter(path =>
+                typeof path === "string" && validRepoPath(path) &&
+                (path === "index.html" || path.startsWith("src/") || path.startsWith("public/") || path.startsWith("worker/")) &&
+                !path.split("/").some(part => part.startsWith(".")) && !path.includes("node_modules") && !path.includes("dist/")))].slice(0, 6) : []
+            }))
+          : [{ agent: availableDevelopers[0], task, allowedPaths: [] }];
+        if (!assignments.length) throw new Error("Gemini не назначил задачу ни одному включённому разработчику.");
+        const claimedPaths = new Set();
+        for (const assignment of assignments) for (const path of assignment.allowedPaths) {
+          if (claimedPaths.has(path)) throw new Error("Gemini назначил один файл нескольким разработчикам: " + path);
+          claimedPaths.add(path);
+        }
+        const delegationResults = await Promise.all(assignments.map(async assignment => {
+          const result = assignment.agent === "qwen" ? await askQwen(assignment) : await askNorth(assignment);
+          return { agent: assignment.agent, task: assignment.task, allowedPaths: assignment.allowedPaths, summary: result.summary || "", changes: result.changes };
+        }));
+        const mergedChanges = [];
+        const changedPaths = new Set();
+        for (const result of delegationResults) for (const change of result.changes) {
+          if (changedPaths.has(change.path)) throw new Error("Исполнители изменили один и тот же файл: " + change.path);
+          changedPaths.add(change.path);
+          mergedChanges.push({ ...change, assignedAgent: result.agent });
+        }
+        const implementation = { summary: delegationResults.map(item => item.summary).filter(Boolean).join(" · ") || plan.summary, changes: mergedChanges };
+        const delegation = delegationResults.map(({ agent, task: assignedTask, allowedPaths, summary, changes }) => ({
+          agent, task: assignedTask, allowedPaths, summary, files: changes.map(change => change.path)
+        }));
         if (!implementation.changes.length) {
           return json({ ok: true, task, plan, summary: implementation.summary || plan.summary,
             model: planResult.model, primaryModel, fallbackUsed: planResult.fallbackUsed,
@@ -1282,7 +1319,8 @@ export default {
         let repairAttempted = false;
         if (!review.approved && allowRepair) {
           repairAttempted = true;
-          implementation = teamSettings.agents.qwen ? await askQwen(JSON.stringify(review)) : await askNorth(JSON.stringify(review));
+          const repairAssignment = { task: "Исправь изменения согласно замечаниям ревью. Исходная задача: " + task, allowedPaths: implementation.changes.map(change => change.path) };
+          implementation = teamSettings.agents.qwen ? await askQwen(repairAssignment, JSON.stringify(review)) : await askNorth(repairAssignment, JSON.stringify(review));
           if (!implementation.changes.length) return json({ error: "Ревью отклонило изменения, а разработчик не предложил исправлений.", review }, 422);
           review = await reviewTeam(implementation.changes);
         }
@@ -1320,6 +1358,16 @@ export default {
             branch, filesChanged: changed, detail: writeError.message }, 502);
         }
 
+        let pullRequest = null;
+        let pullRequestError = null;
+        try {
+          const pr = await githubRequest(env, "/repos/" + GITHUB_REPO + "/pulls", { method: "POST", body: JSON.stringify({
+            title: ("AI Studio: " + (implementation.summary || plan.summary)).slice(0, 200),
+            body: "Подготовлено командой AI Studio.\\n\\nЗадача: " + task.slice(0, 3000) + "\\n\\nИсполнители: " + delegation.map(item => item.agent + " — " + item.files.join(", ")).join("; "),
+            head: branch, base: "main", draft: false
+          }) });
+          pullRequest = { number: pr.number, url: pr.html_url, state: pr.state };
+        } catch (prError) { pullRequestError = prError?.message || "Не удалось открыть Pull Request."; }
         return json({ ok: true, task, plan, summary: implementation.summary || plan.summary,
           model: planResult.model, primaryModel, fallbackUsed: planResult.fallbackUsed,
           qwenModel, gemmaModel, branch, filesChanged: changed, agentsUsed: usage.agents,
