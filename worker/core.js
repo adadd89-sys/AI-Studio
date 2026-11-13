@@ -2,6 +2,11 @@ const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" };
 const SESSION_COOKIE = "ai_studio_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
 
+function scaledTokenBudget(intensity, minimum, maximum) {
+  const level = Math.max(0, Math.min(100, Number.isFinite(Number(intensity)) ? Number(intensity) : 60));
+  return Math.round(minimum + (maximum - minimum) * level / 100);
+}
+
 function json(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data), {
     status,
@@ -42,42 +47,64 @@ async function verifyWorkflowSignature(value, signature, secret) {
   } catch { return false; }
 }
 
-async function createSession(secret) {
+
+async function verifyTelegramInitData(initData, botToken) {
+  if (typeof initData !== "string" || !initData || initData.length > 12000 || !botToken) return null;
+  try {
+    const params = new URLSearchParams(initData);
+    const receivedHash = (params.get("hash") || "").toLowerCase();
+    if (!/^[a-f0-9]{64}$/.test(receivedHash)) return null;
+    params.delete("hash");
+    const entries = [...params.entries()].sort(([left], [right]) => left.localeCompare(right));
+    const checkString = entries.map(([key, value]) => key + "=" + value).join("\n");
+    const webAppKey = await crypto.subtle.importKey("raw", new TextEncoder().encode("WebAppData"),
+      { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const secret = await crypto.subtle.sign("HMAC", webAppKey, new TextEncoder().encode(botToken));
+    const validationKey = await crypto.subtle.importKey("raw", secret, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const digest = new Uint8Array(await crypto.subtle.sign("HMAC", validationKey, new TextEncoder().encode(checkString)));
+    const calculatedHash = [...digest].map(byte => byte.toString(16).padStart(2, "0")).join("");
+    let mismatch = calculatedHash.length ^ receivedHash.length;
+    for (let i = 0; i < Math.min(calculatedHash.length, receivedHash.length); i++) mismatch |= calculatedHash.charCodeAt(i) ^ receivedHash.charCodeAt(i);
+    if (mismatch !== 0) return null;
+    const authDate = Number(params.get("auth_date"));
+    const now = Math.floor(Date.now() / 1000);
+    if (!Number.isInteger(authDate) || authDate > now + 60 || now - authDate > 600) return null;
+    const user = JSON.parse(params.get("user") || "null");
+    if (!user || !Number.isSafeInteger(user.id)) return null;
+    return user;
+  } catch { return null; }
+}
+
+async function createSession(secret, identity = {}) {
   const payload = toBase64Url(new TextEncoder().encode(JSON.stringify({
-    exp: Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS
+    exp: Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS,
+    ...(Number.isSafeInteger(identity.telegramUserId) ? { telegramUserId: identity.telegramUserId } : {})
   })));
   const signature = toBase64Url(await sign(payload, secret));
   return payload + "." + signature;
 }
 
-async function isValidSession(request, secret) {
-  if (!secret) return false;
+export async function getSessionIdentity(request, secret) {
+  if (!secret) return null;
   const cookie = request.headers.get("cookie") || "";
   const token = cookie.split(";").map(part => part.trim())
     .find(part => part.startsWith(SESSION_COOKIE + "="))?.slice(SESSION_COOKIE.length + 1);
-  if (!token) return false;
+  if (!token) return null;
   const [payload, signature, extra] = token.split(".");
-  if (!payload || !signature || extra) return false;
+  if (!payload || !signature || extra) return null;
   try {
-    const key = await crypto.subtle.importKey(
-      "raw",
-      new TextEncoder().encode(secret),
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["verify"]
-    );
-    const valid = await crypto.subtle.verify(
-      "HMAC",
-      key,
-      fromBase64Url(signature),
-      new TextEncoder().encode(payload)
-    );
-    if (!valid) return false;
+    const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret),
+      { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+    const valid = await crypto.subtle.verify("HMAC", key, fromBase64Url(signature), new TextEncoder().encode(payload));
+    if (!valid) return null;
     const data = JSON.parse(new TextDecoder().decode(fromBase64Url(payload)));
-    return Number.isInteger(data.exp) && data.exp > Math.floor(Date.now() / 1000);
-  } catch {
-    return false;
-  }
+    if (!Number.isInteger(data.exp) || data.exp <= Math.floor(Date.now() / 1000)) return null;
+    return { telegramUserId: Number.isSafeInteger(data.telegramUserId) ? data.telegramUserId : null };
+  } catch { return null; }
+}
+
+export async function isValidSession(request, secret) {
+  return Boolean(await getSessionIdentity(request, secret));
 }
 
 function hasSameOrigin(request) {
@@ -149,8 +176,24 @@ function githubError(error) {
   return json({ error: error?.message || "Не удалось выполнить запрос к GitHub." }, status);
 }
 
+export function assertWorkflowExecutionSucceeded(httpStatus, data) {
+  if (!Number.isInteger(httpStatus) || httpStatus < 200 || httpStatus >= 300 || data?.error) {
+    const message = typeof data?.error === "string" && data.error.trim()
+      ? data.error
+      : "Внутреннее выполнение AI Studio завершилось с HTTP " + httpStatus + ".";
+    const error = new Error(message);
+    error.status = httpStatus;
+    throw error;
+  }
+  return { httpStatus, data };
+}
+
+export function hasAuthProvider(env) {
+  return Boolean(env.SESSION_SECRET && (env.APP_PASSWORD || env.TELEGRAM_BOT_TOKEN));
+}
+
 async function requireGithubSession(request, env) {
-  if (!env.APP_PASSWORD || !env.SESSION_SECRET) return json({ error: "Авторизация AI Studio не настроена." }, 503);
+  if (!hasAuthProvider(env)) return json({ error: "Авторизация AI Studio не настроена." }, 503);
   if (!await isValidSession(request, env.SESSION_SECRET)) return json({ error: "Требуется вход в AI Studio." }, 401);
   if (!env.GITHUB_TOKEN) return json({ error: "GitHub ещё не подключён. Добавьте секрет GITHUB_TOKEN в Cloudflare Worker." }, 503);
   return null;
@@ -166,15 +209,32 @@ export default {
         service: "ai-studio-api",
         modelConfigured: Boolean(env.GEMINI_API_KEY),
         qwenConfigured: Boolean(env.AI),
+        openrouterConfigured: Boolean(env.OPENROUTER_API_KEY),
         githubConfigured: Boolean(env.GITHUB_TOKEN),
-        authConfigured: Boolean(env.APP_PASSWORD && env.SESSION_SECRET)
+        authConfigured: Boolean(env.SESSION_SECRET && (env.APP_PASSWORD || env.TELEGRAM_BOT_TOKEN)),
+        telegramAuthConfigured: Boolean(env.TELEGRAM_BOT_TOKEN && env.SESSION_SECRET),
+        passwordAuthConfigured: Boolean(env.APP_PASSWORD && env.SESSION_SECRET)
       });
     }
 
     if (url.pathname === "/api/session" && request.method === "GET") {
       return json({
         authenticated: await isValidSession(request, env.SESSION_SECRET),
-        authConfigured: Boolean(env.APP_PASSWORD && env.SESSION_SECRET)
+        authConfigured: Boolean(env.SESSION_SECRET && (env.APP_PASSWORD || env.TELEGRAM_BOT_TOKEN)),
+        telegramAuthConfigured: Boolean(env.TELEGRAM_BOT_TOKEN && env.SESSION_SECRET)
+      });
+    }
+
+
+    if (url.pathname === "/api/telegram-login" && request.method === "POST") {
+      if (!hasSameOrigin(request)) return json({ error: "Недопустимый источник запроса." }, 403);
+      if (!env.TELEGRAM_BOT_TOKEN || !env.SESSION_SECRET) return json({ error: "Telegram-вход не настроен. Добавьте TELEGRAM_BOT_TOKEN и SESSION_SECRET в секреты Worker." }, 503);
+      const body = await request.json().catch(() => null);
+      const user = await verifyTelegramInitData(body?.initData, env.TELEGRAM_BOT_TOKEN);
+      if (!user) return json({ error: "Подпись Telegram недействительна или данные авторизации устарели." }, 401);
+      const token = await createSession(env.SESSION_SECRET, { telegramUserId: user.id });
+      return json({ ok: true }, 200, {
+        "set-cookie": SESSION_COOKIE + "=" + token + "; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=" + SESSION_TTL_SECONDS
       });
     }
 
@@ -206,7 +266,7 @@ export default {
     }
 
     if (url.pathname === "/api/models/check" && request.method === "GET") {
-      if (!env.APP_PASSWORD || !env.SESSION_SECRET) {
+      if (!hasAuthProvider(env)) {
         return json({ error: "Авторизация ещё не настроена." }, 503);
       }
       if (!await isValidSession(request, env.SESSION_SECRET)) {
@@ -251,7 +311,7 @@ export default {
 
 
     if (url.pathname === "/api/agents/qwen-review" && request.method === "POST") {
-      if (!env.APP_PASSWORD || !env.SESSION_SECRET) {
+      if (!hasAuthProvider(env)) {
         return json({ error: "Авторизация ещё не настроена." }, 503);
       }
       if (!await isValidSession(request, env.SESSION_SECRET)) {
@@ -307,7 +367,7 @@ export default {
     }
 
     if (url.pathname === "/api/agents/gemma-review" && request.method === "POST") {
-      if (!env.APP_PASSWORD || !env.SESSION_SECRET) {
+      if (!hasAuthProvider(env)) {
         return json({ error: "Авторизация ещё не настроена." }, 503);
       }
       if (!await isValidSession(request, env.SESSION_SECRET)) {
@@ -450,42 +510,111 @@ export default {
     }
 
 
+
+    if (url.pathname === "/api/chat" && request.method === "POST") {
+      if (!hasAuthProvider(env)) return json({ error: "Авторизация AI Studio не настроена." }, 503);
+      if (!await isValidSession(request, env.SESSION_SECRET)) return json({ error: "Требуется вход в AI Studio." }, 401);
+      if (!hasSameOrigin(request)) return json({ error: "Недопустимый источник запроса." }, 403);
+      const body = await request.json().catch(() => null);
+      const message = typeof body?.message === "string" ? body.message.trim() : "";
+      if (!message) return json({ error: "Напишите сообщение." }, 400);
+      if (message.length > 4000) return json({ error: "Сообщение слишком длинное. Максимум — 4000 символов." }, 413);
+      const raw = body?.teamSettings && typeof body.teamSettings === "object" ? body.teamSettings : {};
+      const enabled = raw.agents && typeof raw.agents === "object" ? raw.agents : {};
+      const agent = enabled.gemini !== false ? "gemini" : enabled.qwen !== false ? "qwen" : enabled.north === true ? "north" : enabled.gemma !== false ? "gemma" : null;
+      if (!agent) return json({ error: "Включите хотя бы одного ИИ-агента в настройках." }, 400);
+      const intensity = Math.max(0, Math.min(100, Number.isFinite(Number(raw.intensity)) ? Number(raw.intensity) : 20));
+      const history = Array.isArray(body?.history) ? body.history.slice(-12).filter(item => item && ["user","assistant"].includes(item.role) && typeof item.content === "string").map(item => ({ role: item.role, content: item.content.slice(0, 4000) })) : [];
+      const messages = [...history, { role: "user", content: message }];
+      try {
+        let reply = "";
+        if (agent === "gemini") {
+          if (!env.GEMINI_API_KEY) return json({ error: "Gemini включён, но GEMINI_API_KEY не настроен." }, 503);
+          const contents = messages.map(item => ({ role: item.role === "assistant" ? "model" : "user", parts: [{ text: item.content }] }));
+          const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(env.GEMINI_MODEL || "gemini-4-hydrogen") + ":generateContent?key=" + encodeURIComponent(env.GEMINI_API_KEY), {
+            method: "POST", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ contents, generationConfig: { temperature: 0.7, maxOutputTokens: scaledTokenBudget(intensity, 512, 1536) } })
+          });
+          if (!response.ok) throw new Error("Gemini API вернул HTTP " + response.status);
+          const payload = await response.json();
+          reply = payload?.candidates?.[0]?.content?.parts?.map(part => part.text || "").join("").trim() || "";
+        } else if (agent === "qwen" || agent === "gemma") {
+          if (!env.AI) return json({ error: "Cloudflare Workers AI не настроен." }, 503);
+          const model = agent === "qwen" ? (env.QWEN_MODEL || "@cf/qwen/qwen3.8-27b") : (env.GEMMA_MODEL || "@cf/google/gemma-4-26b-a4b-it");
+          const result = await env.AI.run(model, { messages: [{ role: "system", content: "Ты — собеседник AI Studio. Отвечай естественно, по-русски, кратко и по существу. Не выполняй разработку, не вызывай инструменты и не утверждай, что совершил действия." }, ...messages], max_completion_tokens: scaledTokenBudget(intensity, 512, 1536), temperature: 0.7 });
+          reply = result?.response || result?.choices?.[0]?.message?.content || result?.choices?.[0]?.message?.reasoning_content || "";
+        } else {
+          if (!env.OPENROUTER_API_KEY) return json({ error: "Cohere North Mini Code включён, но OPENROUTER_API_KEY не настроен." }, 503);
+          const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST", headers: { "content-type": "application/json", "authorization": "Bearer " + env.OPENROUTER_API_KEY, "http-referer": "https://ai-studio.sergey-adadd89.workers.dev", "x-title": "AI Studio" },
+            body: JSON.stringify({ model: "cohere/north-mini-code:free", max_tokens: scaledTokenBudget(intensity, 512, 1536), messages: [{ role: "system", content: "Ты — собеседник AI Studio. Отвечай естественно, по-русски, кратко и по существу. Не утверждай, что совершил действия." }, ...messages] })
+          });
+          if (!response.ok) throw new Error("OpenRouter вернул HTTP " + response.status);
+          const payload = await response.json();
+          reply = payload?.choices?.[0]?.message?.content || payload?.choices?.[0]?.message?.reasoning_content || "";
+        }
+        if (!reply.trim()) throw new Error("Агент вернул пустой ответ.");
+        return json({ ok: true, reply: reply.trim(), agent, agentsUsed: [agent], usage: { requests: 1, neurons: null } });
+      } catch (error) {
+        return json({ error: error?.message || "Не удалось получить ответ агента." }, 502);
+      }
+    }
+
     if (url.pathname === "/api/execute-internal" && request.method === "POST") {
       let body;
       try { body = await request.json(); } catch { return json({ error: "Ожидается корректный JSON." }, 400); }
       const task = typeof body?.task === "string" ? body.task.trim() : "";
+      const teamSettings = body?.teamSettings && typeof body.teamSettings === "object" ? body.teamSettings : {};
       const jobId = typeof body?.jobId === "string" ? body.jobId : "";
       const timestamp = Number(body?.timestamp);
       const signature = request.headers.get("x-ai-studio-workflow-signature") || "";
       if (!task || !jobId || !Number.isInteger(timestamp) || Math.abs(Date.now() - timestamp) > 5 * 60 * 1000) {
         return json({ error: "Недопустимый внутренний запрос Workflow." }, 401);
       }
-      if (!await verifyWorkflowSignature(jobId + "." + timestamp + "." + task, signature, env.SESSION_SECRET)) {
+      if (!await verifyWorkflowSignature(jobId + "." + timestamp + "." + JSON.stringify({ task, teamSettings }), signature, env.SESSION_SECRET)) {
         return json({ error: "Подпись внутреннего запроса Workflow недействительна." }, 401);
       }
       const internalRequest = new Request("https://studio.internal/api/execute", {
         method: "POST",
         headers: { "content-type": "application/json", "origin": "https://studio.internal",
           "cookie": SESSION_COOKIE + "=" + await createSession(env.SESSION_SECRET) },
-        body: JSON.stringify({ task })
+        body: JSON.stringify({ task, teamSettings })
       });
       return this.fetch(internalRequest, env);
     }
 
     if (url.pathname === "/api/execute" && request.method === "POST") {
-      if (!env.APP_PASSWORD || !env.SESSION_SECRET) return json({ error: "Авторизация ещё не настроена." }, 503);
+      if (!hasAuthProvider(env)) return json({ error: "Авторизация ещё не настроена." }, 503);
       if (!await isValidSession(request, env.SESSION_SECRET)) return json({ error: "Требуется вход в AI Studio." }, 401);
       if (!hasSameOrigin(request)) return json({ error: "Недопустимый источник запроса." }, 403);
-      if (!env.GEMINI_API_KEY) return json({ error: "Gemini API не подключён." }, 503);
-      if (!env.AI) return json({ error: "Workers AI не подключён. Нужны Qwen и Gemma." }, 503);
       if (!env.GITHUB_TOKEN) return json({ error: "GitHub не подключён. Проверьте GITHUB_TOKEN." }, 503);
 
       let body;
       try { body = await request.json(); } catch { return json({ error: "Ожидается корректный JSON." }, 400); }
       const task = typeof body?.task === "string" ? body.task.trim() : "";
+      const rawSettings = body?.teamSettings && typeof body.teamSettings === "object" ? body.teamSettings : {};
+      const teamSettings = {
+        intensity: rawSettings.mode === "max" ? 100 : Math.max(0, Math.min(100, Number.isFinite(Number(rawSettings.intensity)) ? Math.round(Number(rawSettings.intensity) / 5) * 5 : 60)),
+        mode: ["chat", "normal", "max"].includes(rawSettings.mode) ? rawSettings.mode : "normal",
+        agents: {
+          gemini: rawSettings.agents?.gemini !== false,
+          qwen: rawSettings.agents?.qwen !== false,
+          gemma: rawSettings.agents?.gemma !== false,
+          north: rawSettings.agents?.north === true
+        }
+      };
       if (!task) return json({ error: "Опишите задачу." }, 400);
+      if (teamSettings.mode === "chat") return json({ error: "Для режима общения используйте отдельный маршрут /api/chat." }, 400);
+      if (!teamSettings.agents.qwen && !teamSettings.agents.north) return json({ error: "Включите Qwen или Cohere North Mini Code — нужен хотя бы один разработчик." }, 400);
+      if (teamSettings.agents.gemini && !env.GEMINI_API_KEY) return json({ error: "Gemini включён, но GEMINI_API_KEY не настроен." }, 503);
+      if ((teamSettings.agents.qwen || (teamSettings.agents.gemma && teamSettings.intensity >= 50)) && !env.AI) return json({ error: "Для включённых Qwen/Gemma требуется Cloudflare Workers AI." }, 503);
+      if (teamSettings.agents.north && !env.OPENROUTER_API_KEY) return json({ error: "Cohere North Mini Code включён, но OPENROUTER_API_KEY ещё не добавлен в секреты Cloudflare." }, 503);
       if (task.length > 6000) return json({ error: "Задача слишком длинная. Максимум — 6000 символов." }, 413);
 
+      const usage = { requests: 0, neurons: null, agents: [] };
+      const intensity = teamSettings.mode === "max" ? 100 : teamSettings.intensity;
+      const deepReview = teamSettings.agents.gemma && intensity >= 50;
+      const allowRepair = intensity >= 80;
       const primaryModel = env.GEMINI_MODEL || "gemini-4-hydrogen";
       const fallbackModel = env.GEMINI_FALLBACK_MODEL || "gemini-3.8-flash";
       const qwenModel = env.QWEN_MODEL || "@cf/qwen/qwen3.8-27b";
@@ -560,11 +689,13 @@ export default {
         return value && Array.isArray(value.changes) ? value : null;
       }
       async function callGemini(prompt) {
+        usage.agents.push("gemini");
         const requestBody = JSON.stringify({
           contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: { responseMimeType: "application/json", temperature: 0.2 }
+          generationConfig: { responseMimeType: "application/json", temperature: 0.2, maxOutputTokens: scaledTokenBudget(intensity, 768, 2048) }
         });
         async function call(model) {
+          usage.requests++;
           return fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) +
             ":generateContent?key=" + encodeURIComponent(env.GEMINI_API_KEY), {
               method: "POST", headers: { "content-type": "application/json" }, body: requestBody
@@ -586,11 +717,11 @@ export default {
 
       let executionStage = "gemini_plan";
       try {
-        const planResult = await callGemini(
+        const planResult = teamSettings.agents.gemini ? await callGemini(
           "Ты — руководитель команды разработки AI Studio. Проанализируй задачу и составь конкретный исполнимый план для изменения текущего репозитория AI Studio. " +
           "Верни только JSON: {\"summary\":\"...\",\"steps\":[\"...\"],\"acceptanceCriteria\":[\"...\"],\"risks\":[\"...\"],\"questions\":[]}. " +
           "Если данных достаточно, questions должен быть пустым массивом. Не утверждай, что работа уже выполнена. Задача пользователя: " + task
-        );
+        ) : { data: { summary: "План сформирован без Gemini в экономном режиме", steps: ["Изучить затронутые файлы", "Подготовить изменения", "Проверить результат"], acceptanceCriteria: [], risks: [], questions: [] }, model: "Локальный план", fallbackUsed: false };
         const plan = planResult.data;
         if (typeof plan.summary !== "string" || !Array.isArray(plan.steps) || !plan.steps.length) {
           return json({ error: "Gemini составил план в неожиданном формате." }, 502);
@@ -620,7 +751,7 @@ export default {
         }
 
         const developerSystem =
-          "Ты — Qwen, основной разработчик команды AI Studio. Подготовь реальные изменения файлов существующего репозитория. " +
+          "Ты — основной разработчик команды AI Studio. Подготовь реальные изменения файлов существующего репозитория. " +
           "Верни ТОЛЬКО JSON без Markdown: {\"summary\":\"...\",\"changes\":[{\"path\":\"src/...\",\"content\":\"ПОЛНОЕ СОДЕРЖИМОЕ ФАЙЛА\",\"reason\":\"...\"}]}. " +
           "Каждый content — полное содержимое файла, не diff. Не выдумывай секреты и API-ключи. " +
           "Не меняй workflows, package.json, package-lock, wrangler config, настройки доступа или секреты. " +
@@ -632,6 +763,8 @@ export default {
         const planText = JSON.stringify(plan);
         async function askQwen(feedback) {
           executionStage = feedback ? "qwen_repair" : "qwen_implementation";
+          usage.requests++;
+          if (!usage.agents.includes("qwen")) usage.agents.push("qwen");
           const result = await env.AI.run(qwenModel, {
             messages: [
               { role: "system", content: developerSystem },
@@ -639,7 +772,7 @@ export default {
                 "\n\n" + contextText + (feedback ? "\n\nЗамечания Gemma:\n" + feedback : "") +
                 "\n\nПодготовь законченные изменения файлов. Ответ только JSON." }
             ],
-            max_completion_tokens: 4096,
+            max_completion_tokens: scaledTokenBudget(intensity, 1200, 4096),
             reasoning_effort: "low",
             chat_template_kwargs: { enable_thinking: false },
             temperature: 0.15
@@ -667,12 +800,33 @@ export default {
           return parsed;
         }
 
-        let implementation = await askQwen("");
+        async function askNorth(feedback = "") {
+          executionStage = feedback ? "north_repair" : "north_implementation";
+          usage.requests++;
+          if (!usage.agents.includes("north")) usage.agents.push("north");
+          const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: { "content-type": "application/json", "authorization": "Bearer " + env.OPENROUTER_API_KEY, "http-referer": "https://ai-studio.sergey-adadd89.workers.dev", "x-title": "AI Studio" },
+            body: JSON.stringify({ model: "cohere/north-mini-code:free", temperature: 0.15, max_tokens: scaledTokenBudget(intensity, 1200, 4096),
+              messages: [{ role: "system", content: developerSystem }, { role: "user", content: "Задача пользователя:\n" + task + "\n\nПлан Gemini:\n" + planText + "\n\n" + contextText + (feedback ? "\n\nЗамечания ревью:\n" + feedback : "") + "\n\nПодготовь законченные изменения файлов. Ответ только JSON." }] })
+          });
+          if (!response.ok) { const err = await response.text(); throw new Error("OpenRouter North Mini Code: HTTP " + response.status + " — " + err.slice(0, 300)); }
+          const payload = await response.json();
+          const parsed = normalizeQwenPayload(parseJsonObject(modelText(payload)));
+          if (!parsed) throw new Error("Cohere North Mini Code вернула ответ не в формате JSON с массивом changes.");
+          if (parsed.changes.length > 6) throw new Error("North предложила изменить больше 6 файлов.");
+          for (const change of parsed.changes) {
+            if (!change || typeof change.path !== "string" || typeof change.content !== "string" || !validRepoPath(change.path) || !(change.path === "index.html" || change.path.startsWith("src/") || change.path.startsWith("public/") || change.path.startsWith("worker/")) || change.path.split("/").some(part => part.startsWith(".")) || change.path.includes("node_modules") || change.path.includes("dist/") || change.content.length > 250000) throw new Error("North вернула недопустимое изменение файла.");
+          }
+          return parsed;
+        }
+        let implementation = teamSettings.agents.qwen ? await askQwen("") : await askNorth("");
         if (!implementation.changes.length) {
           return json({ ok: true, task, plan, summary: implementation.summary || plan.summary,
             model: planResult.model, primaryModel, fallbackUsed: planResult.fallbackUsed,
-            qwenModel, gemmaModel, branch: null, filesChanged: [],
-            qwenReview: "Qwen не предложил изменений файлов.",
+            qwenModel, gemmaModel, branch: null, filesChanged: [], agentsUsed: usage.agents,
+            usage: { requests: usage.requests, neurons: null },
+            qwenReview: "Разработчик не предложил изменений файлов.",
             gemmaReview: "Проверка кода не запускалась, так как изменений нет." });
         }
 
@@ -680,6 +834,8 @@ export default {
           executionStage = "gemma_review";
           const reviewInput = JSON.stringify({ task, plan,
             changes: changes.map(change => ({ path: change.path, reason: change.reason || "", content: change.content.slice(0, 24000) })) });
+          usage.requests++;
+          if (!usage.agents.includes("gemma")) usage.agents.push("gemma");
           const result = await env.AI.run(gemmaModel, {
             messages: [
               { role: "system", content: "Ты — Gemma, независимый ревьюер и тестировщик. Критически проверь изменения на соответствие задаче, ошибки, безопасность и поломку архитектуры. " +
@@ -687,23 +843,58 @@ export default {
                 "approved=true только если изменения пригодны к сохранению. Не утверждай, что запускал тесты: ты анализируешь код." },
               { role: "user", content: reviewInput }
             ],
-            max_completion_tokens: 2200, temperature: 0.1
+            max_completion_tokens: scaledTokenBudget(intensity, 1200, 2400), temperature: 0.1
           });
           const parsed = parseJsonObject(modelText(result));
           if (!parsed || typeof parsed.approved !== "boolean" || !Array.isArray(parsed.issues)) throw new Error("Gemma вернула ответ не в ожидаемом формате.");
           return parsed;
         }
 
-        let review = await reviewChanges(implementation.changes);
+        async function reviewWithNorth(changes) {
+          executionStage = "north_review";
+          usage.requests++;
+          if (!usage.agents.includes("north")) usage.agents.push("north");
+          const reviewInput = JSON.stringify({ task, plan, changes: changes.map(change => ({ path: change.path, reason: change.reason || "", content: change.content.slice(0, 16000) })) });
+          const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: { "content-type": "application/json", "authorization": "Bearer " + env.OPENROUTER_API_KEY, "http-referer": "https://ai-studio.sergey-adadd89.workers.dev", "x-title": "AI Studio" },
+            body: JSON.stringify({ model: "cohere/north-mini-code:free", temperature: 0.1, max_tokens: scaledTokenBudget(intensity, 800, 1600),
+              messages: [
+                { role: "system", content: 'Ты — независимый ревьюер AI Studio. Проверь изменения на соответствие задаче, ошибки, безопасность и возможные регрессии. Верни только JSON: {"approved":true,"summary":"...","issues":["..."]}. Не утверждай, что запускал тесты.' },
+                { role: "user", content: reviewInput }
+              ] })
+          });
+          if (!response.ok) throw new Error("OpenRouter North review вернул HTTP " + response.status);
+          const payload = await response.json();
+          const parsed = parseJsonObject(modelText(payload));
+          if (!parsed || typeof parsed.approved !== "boolean" || !Array.isArray(parsed.issues)) throw new Error("North Mini Code вернула отзыв не в ожидаемом формате.");
+          return parsed;
+        }
+
+        async function reviewTeam(changes) {
+          const reviews = [];
+          if (deepReview) reviews.push({ agent: "gemma", result: await reviewChanges(changes) });
+          if (teamSettings.agents.north && intensity >= 50) reviews.push({ agent: "north", result: await reviewWithNorth(changes) });
+          return {
+            approved: reviews.every(item => item.result.approved),
+            summary: reviews.map(item => (item.agent === "north" ? "North: " : "Gemma: ") + (item.result.summary || (item.result.approved ? "Одобрено" : "Есть замечания"))).join(" · ") || "Ревью пропущено согласно выбранной интенсивности.",
+            issues: reviews.flatMap(item => item.result.issues || []),
+            northReview: reviews.find(item => item.agent === "north")?.result || null
+          };
+        }
+
+        let review = deepReview || (teamSettings.agents.north && intensity >= 50)
+          ? await reviewTeam(implementation.changes)
+          : { approved: true, summary: "Ревью пропущено согласно выбранной интенсивности.", issues: [], northReview: null };
         let repairAttempted = false;
-        if (!review.approved) {
+        if (!review.approved && allowRepair) {
           repairAttempted = true;
-          implementation = await askQwen(JSON.stringify(review));
-          if (!implementation.changes.length) return json({ error: "Gemma отклонила изменения, а Qwen не предложил исправления.", review }, 422);
-          review = await reviewChanges(implementation.changes);
+          implementation = teamSettings.agents.qwen ? await askQwen(JSON.stringify(review)) : await askNorth(JSON.stringify(review));
+          if (!implementation.changes.length) return json({ error: "Ревью отклонило изменения, а разработчик не предложил исправлений.", review }, 422);
+          review = await reviewTeam(implementation.changes);
         }
         if (!review.approved) return json({
-          error: "Gemma не одобрила изменения после исправления. В GitHub ничего не записано.",
+          error: "Команда ревью не одобрила изменения. В GitHub ничего не записано.",
           plan, review, repairAttempted
         }, 422);
 
@@ -738,10 +929,11 @@ export default {
 
         return json({ ok: true, task, plan, summary: implementation.summary || plan.summary,
           model: planResult.model, primaryModel, fallbackUsed: planResult.fallbackUsed,
-          qwenModel, gemmaModel, branch, filesChanged: changed,
-          qwenReview: "Изменения подготовлены Qwen.",
-          gemmaReview: review.summary || (review.issues.length ? review.issues.join("\n") : "Изменения одобрены."),
-          reviewIssues: review.issues, repairAttempted });
+          qwenModel, gemmaModel, branch, filesChanged: changed, agentsUsed: usage.agents,
+          usage: { requests: usage.requests, neurons: null },
+          qwenReview: teamSettings.agents.qwen ? "Изменения подготовлены Qwen." : "Изменения подготовлены Cohere North Mini Code.",
+          gemmaReview: deepReview ? (review.summary || (review.issues.length ? review.issues.join("\n") : "Изменения одобрены.")) : "Ревью пропущено согласно интенсивности.",
+          reviewIssues: review.issues, northReview: review.northReview, repairAttempted });
       } catch (error) {
         return json({
           error: error?.message || "Не удалось выполнить задачу командой ИИ.",
@@ -751,6 +943,9 @@ export default {
             github_context: "Чтение контекста GitHub",
             qwen_implementation: "Разработка Qwen",
             qwen_repair: "Исправление Qwen",
+            north_implementation: "Разработка Cohere North Mini Code",
+            north_repair: "Исправление Cohere North Mini Code",
+            north_review: "Проверка Cohere North Mini Code",
             gemma_review: "Проверка Gemma",
             github_save: "Сохранение изменений в GitHub"
           })[executionStage] || executionStage,
@@ -760,7 +955,7 @@ export default {
     }
 
     if (url.pathname === "/api/plan" && request.method === "POST") {
-      if (!env.APP_PASSWORD || !env.SESSION_SECRET) {
+      if (!hasAuthProvider(env)) {
         return json({ error: "Авторизация ещё не настроена. Добавьте APP_PASSWORD и SESSION_SECRET в секреты Worker." }, 503);
       }
       if (!await isValidSession(request, env.SESSION_SECRET)) {
