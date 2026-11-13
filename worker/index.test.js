@@ -850,7 +850,7 @@ describe("AI Studio Worker", () => {
     const requestedModels = [];
     globalThis.fetch = async url => {
       const target = String(url);
-      const model = target.match(/models\\/([^:]+):generateContent/)?.[1];
+      const model = target.match(/models\/([^:]+):generateContent/)?.[1];
       requestedModels.push(model);
       if (model === "gemini-4-hydrogen") {
         return new Response("upstream timeout", { status: 524 });
