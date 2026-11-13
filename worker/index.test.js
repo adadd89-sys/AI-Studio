@@ -16,7 +16,7 @@ async function createTelegramInitData(userId, botToken = env.TELEGRAM_BOT_TOKEN,
     ["query_id", "AAE-test-query"],
     ["user", JSON.stringify({ id: userId, first_name: "Test" })]
   ];
-  const checkString = [...entries].sort(([left], [right]) => left.localeCompare(right)).map(([key, value]) => key + "=" + value).join("\\n");
+  const checkString = [...entries].sort(([left], [right]) => left.localeCompare(right)).map(([key, value]) => key + "=" + value).join("\n");
   const webAppKey = await crypto.subtle.importKey("raw", new TextEncoder().encode("WebAppData"), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const secret = await crypto.subtle.sign("HMAC", webAppKey, new TextEncoder().encode(botToken));
   const validationKey = await crypto.subtle.importKey("raw", secret, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
