@@ -1469,7 +1469,7 @@ export default {
         try {
           const pr = await githubRequest(env, "/repos/" + GITHUB_REPO + "/pulls", { method: "POST", body: JSON.stringify({
             title: ("AI Studio: " + (implementation.summary || plan.summary)).slice(0, 200),
-            body: "Подготовлено командой AI Studio.\n\nЗадача: " + task.slice(0, 3000) + "\n\nИсполнители: " + delegation.map(item => item.agent + " — " + item.files.join(", ")).join("; "),
+            body: "Подготовлено командой AI Studio.\n\nЗадача: " + task.slice(0, 3000) + "\n\nИсполнители: " + delegation.map(item => item.agent + " — " + item.files.join(", ")).join("; ") + "\n\nНезависимое ревью: " + ((review.reviewers || []).join(", ") || "не запускалось по настройкам интенсивности"),
             head: branch, base: "main", draft: false
           }) });
           pullRequest = { number: pr.number, url: pr.html_url, state: pr.state };
@@ -1478,6 +1478,7 @@ export default {
           model: planResult.model, primaryModel, fallbackUsed: planResult.fallbackUsed,
           qwenModel, gemmaModel, branch, filesChanged: changed, agentsUsed: usage.agents,
           usage: { requests: usage.requests, neurons: null },
+          reviewers: review.reviewers || [],
           qwenReview: teamSettings.agents.qwen ? "Изменения подготовлены Qwen." : "Изменения подготовлены Cohere North Mini Code.",
           gemmaReview: deepReview ? (review.summary || (review.issues.length ? review.issues.join("\n") : "Изменения одобрены.")) : "Ревью пропущено согласно интенсивности.",
           reviewIssues: review.issues, northReview: review.northReview, repairAttempted });
