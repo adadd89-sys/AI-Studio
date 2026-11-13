@@ -589,7 +589,7 @@ export default {
       const task = typeof body?.task === "string" ? body.task.trim() : "";
       const rawSettings = body?.teamSettings && typeof body.teamSettings === "object" ? body.teamSettings : {};
       const teamSettings = {
-        intensity: Math.max(0, Math.min(100, Number.isFinite(Number(rawSettings.intensity)) ? Math.round(Number(rawSettings.intensity) / 5) * 5 : 60)),
+        intensity: rawSettings.mode === "max" ? 100 : Math.max(0, Math.min(100, Number.isFinite(Number(rawSettings.intensity)) ? Math.round(Number(rawSettings.intensity) / 5) * 5 : 60)),
         mode: ["chat", "normal", "max"].includes(rawSettings.mode) ? rawSettings.mode : "normal",
         agents: {
           gemini: rawSettings.agents?.gemini !== false,
