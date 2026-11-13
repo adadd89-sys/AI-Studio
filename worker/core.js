@@ -109,7 +109,7 @@ export async function getSessionIdentity(request, secret, ownerId) {
 }
 
 export async function isValidSession(request, secret, ownerId) {
-  if (!/^\\d{1,20}$/.test(String(ownerId || ""))) return false;
+  if (!/^\d{1,20}$/.test(String(ownerId || ""))) return false;
   return Boolean(await getSessionIdentity(request, secret, ownerId));
 }
 
@@ -195,7 +195,7 @@ export function assertWorkflowExecutionSucceeded(httpStatus, data) {
 }
 
 export function hasAuthProvider(env) {
-  return Boolean(env.SESSION_SECRET && env.TELEGRAM_BOT_TOKEN && /^\\d{1,20}$/.test(String(env.TELEGRAM_OWNER_ID || "")));
+  return Boolean(env.SESSION_SECRET && env.TELEGRAM_BOT_TOKEN && /^\d{1,20}$/.test(String(env.TELEGRAM_OWNER_ID || "")));
 }
 
 async function requireGithubSession(request, env) {
