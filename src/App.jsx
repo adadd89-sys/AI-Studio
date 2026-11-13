@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity, Bot, BrainCircuit, Check, ChevronDown, ChevronRight,
-  CircleHelp, Code2, Command, FolderKanban, GitBranch, GitPlus, LayoutDashboard,
+  CircleHelp, Code2, Command, FolderKanban, GitBranch, LayoutDashboard,
   MessageSquare, Plus, Send, Settings2, ShieldCheck, Sparkles, Terminal,
   Users, Workflow, Zap, FileText, Save, RefreshCw, GitCommit, X, Gauge, BarChart3, MessageCircle
 } from 'lucide-react';
@@ -196,7 +196,7 @@ function CodeWorkspace() {
           {(branches.includes('main') ? branches : ['main', ...branches]).map(name => <option key={name} value={name}>{name}</option>)}
         </select>
       </label>
-      <div className="branch-create"><input value={newBranch} onChange={event => setNewBranch(event.target.value)} aria-label="Название новой ветки"/><button onClick={createBranch} disabled={busy || !newBranch.trim()}><GitPlus size={14}/> Создать ветку</button></div>
+      <div className="branch-create"><input value={newBranch} onChange={event => setNewBranch(event.target.value)} aria-label="Название новой ветки"/><button onClick={createBranch} disabled={busy || !newBranch.trim()}><GitBranch size={14}/> Создать ветку</button></div>
     </div>
     {branch === 'main' && <div className="main-protection"><ShieldCheck size={15}/> Ветка main доступна только для чтения. Создайте отдельную ветку перед сохранением изменений.</div>}
     {error && <div className="task-error" role="alert">{error}</div>}
