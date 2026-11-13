@@ -196,7 +196,7 @@ function CodeWorkspace() {
           {(branches.includes('main') ? branches : ['main', ...branches]).map(name => <option key={name} value={name}>{name}</option>)}
         </select>
       </label>
-      <div className="branch-create"><input value={newBranch} onChange={event => setNewBranch(event.target.value)} aria-label="Название новой ветки"/><button onClick={createBranch} disabled={busy || !newBranch.trim()}><GitPlus size={14}/> Создать ветку</button></div>
+      <div className="branch-create"><input value={newBranch} onChange={event => setNewBranch(event.target.value)} aria-label="Название новой ветки"/><button onClick={createBranch} disabled={busy || !newBranch.trim()}><GitBranch size={14}/> Создать ветку</button></div>
     </div>
     {branch === 'main' && <div className="main-protection"><ShieldCheck size={15}/> Ветка main доступна только для чтения. Создайте отдельную ветку перед сохранением изменений.</div>}
     {error && <div className="task-error" role="alert">{error}</div>}
@@ -246,6 +246,7 @@ function App() {
   const [showAll, setShowAll] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [taskError, setTaskError] = useState('');
+  const [reviewFailure, setReviewFailure] = useState(null);
   const [lastPlan, setLastPlan] = useState(null);
   const [geminiHealth, setGeminiHealth] = useState(null);
   const [geminiCallStatus, setGeminiCallStatus] = useState(null);
@@ -494,9 +495,11 @@ function App() {
     if (!value || isSubmitting) return;
     setIsSubmitting(true);
     setTaskError('');
+    setReviewFailure(null);
     if (teamSettings.mode === 'chat') {
       setChatLoading(true);
-      setChatStatus('Запрос отправлен. Ожидаю ответ модели…');
+      const chatLead = teamSettings.agents.gemini ? 'Gemini' : teamSettings.agents.qwen ? 'Qwen' : teamSettings.agents.north ? 'Cohere North' : 'Gemma';
+      setChatStatus(chatLead + ' получает запрос и готовит ответ…');
       setChatMessages(current => [...current, { role: 'user', content: value }].slice(-24));
       try {
         const response = await fetch('/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: value, history: chatMessages, teamSettings }) });
@@ -507,22 +510,23 @@ function App() {
         const reply = String(data.reply || 'Ответ не получен.');
         setChatMessages(current => [...current, { role: 'assistant', content: '', agent: data.agent }].slice(-24));
         setTask('');
-        setChatStatus('Ответ получен · показываю постепенно');
-        for (let index = 0; index < reply.length; index += 28) {
-          const chunk = reply.slice(index, index + 28);
+        setChatStatus('Ответ получен · постепенно вывожу текст…');
+        for (let index = 0; index < reply.length; index += 6) {
+          const chunk = reply.slice(index, index + 6);
           setChatMessages(current => current.map((item, itemIndex) => itemIndex === current.length - 1
             ? { ...item, content: item.content + chunk }
             : item));
-          await new Promise(resolve => setTimeout(resolve, 18));
+          await new Promise(resolve => setTimeout(resolve, 24));
         }
+        setChatStatus('Ответ готов · ' + (data.agent || 'ИИ'));
         setUsageEvents(current => [{ id: Date.now(), at: new Date().toISOString(), mode: 'chat', intensity: teamSettings.intensity, agents: data.agentsUsed || [data.agent], requests: data.usage?.requests ?? 1, neurons: null, task: value.slice(0,160) }, ...current].slice(0,300));
         setReviewStatus('Ответ получен от ' + data.agent + '. В режиме общения разработка и GitHub не запускаются.');
       } catch (error) {
+        setChatStatus('Не удалось получить ответ');
         setTaskError(error.message || 'Не удалось получить ответ.');
       } finally {
         setIsSubmitting(false);
         setChatLoading(false);
-        setChatStatus('');
       }
       return;
     }
@@ -561,7 +565,15 @@ function App() {
         if (statusData.status === 'complete') {
           data = statusData.output?.data || null;
           if (!data) { workflowFailed = true; throw new Error('Workflow завершился без результата выполнения.'); }
-          if (statusData.output?.httpStatus >= 400 || data.error) { workflowFailed = true; throw new Error(data.error || 'Команда ИИ не смогла выполнить задачу.'); }
+          if (statusData.output?.httpStatus >= 400 || data.error) {
+            workflowFailed = true;
+            if (data.review) setReviewFailure({
+              summary: data.review.summary || 'Команда ревью обнаружила замечания.',
+              issues: Array.isArray(data.review.issues) ? data.review.issues : [],
+              northReview: data.review.northReview || null
+            });
+            throw new Error(data.error || 'Команда ИИ не смогла выполнить задачу.');
+          }
           completed = true;
           break;
         }
@@ -768,18 +780,26 @@ function App() {
           </section>}
 
           <section className={teamSettings.mode === 'chat' ? 'task-panel chat-mode' : 'task-panel'}>
-            <div className="task-panel-heading"><div className="task-icon"><Command size={18} /></div><div><h2>{teamSettings.mode === 'chat' ? 'Чат с ИИ' : 'Новая задача'}</h2><p>{teamSettings.mode === 'chat' ? 'Общайтесь с выбранной моделью — ответ появится постепенно' : 'Опишите, что нужно создать или улучшить'}</p></div><span className="task-step">{teamSettings.mode === 'chat' ? 'AI CHAT' : '01 / ЗАПУСК'}</span></div>
+            <div className="task-panel-heading"><div className="task-icon"><Command size={18} /></div><div><h2>{teamSettings.mode === 'chat' ? 'Чат с ИИ' : 'Новая задача'}</h2><p>{teamSettings.mode === 'chat' ? 'Общайтесь с выбранной моделью — ответ появится постепенно' : 'Опишите, что нужно создать или улучшить'}</p></div><div className="task-mode-switch" aria-label="Режим работы"><button type="button" className={teamSettings.mode === 'chat' ? 'active' : ''} onClick={() => updateTeamSetting('mode','chat')}><MessageCircle size={14}/> Чат</button><button type="button" className={teamSettings.mode !== 'chat' ? 'active' : ''} onClick={() => updateTeamSetting('mode','normal')}><Terminal size={14}/> Задача</button></div></div>
             {teamSettings.mode === 'chat' && <div className="chat-thread" ref={chatThreadRef} aria-live="polite">
               {chatMessages.length === 0 && <div className="chat-empty"><div className="chat-empty-orb"><BrainCircuit size={25}/></div><strong>С чего начнём?</strong><span>Напишите сообщение — команда ИИ ответит в этом чате.</span></div>}
               {chatMessages.map((item,index) => <div key={index} className={'chat-message ' + item.role}><span>{item.role === 'user' ? 'Вы' : item.agent || 'AI Studio'}</span><p>{item.content || (item.role === 'assistant' ? <span className="typing-dots"><i/><i/><i/></span> : '')}</p></div>)}
-              {chatLoading && <div className="chat-working"><span className="working-pulse"/><span>{chatStatus || 'Модель готовит ответ…'}</span></div>}
+              {(chatLoading || chatStatus) && <div className={'chat-working ' + (chatLoading ? '' : chatStatus.startsWith('Не удалось') ? 'error' : 'complete')} role="status"><span className={chatLoading ? 'working-pulse' : chatStatus.startsWith('Не удалось') ? 'working-error' : 'working-check'}>{chatLoading ? '' : chatStatus.startsWith('Не удалось') ? '!' : '✓'}</span><span>{chatStatus || 'Модель готовит ответ…'}</span></div>}
             </div>}
             <form onSubmit={submitTask}>
               {teamSettings.mode !== 'chat' && <label className="task-project-select">Проект <select value={selectedProjectId} onChange={event => setSelectedProjectId(event.target.value)}><option value="">Без проекта</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>}
               <textarea value={task} onChange={e => setTask(e.target.value)} placeholder={teamSettings.mode === 'chat' ? "Напишите сообщение команде…" : "Например: создай Telegram-бота для записи клиентов, продумай архитектуру, напиши код и проверь его..."} rows={3} />
               <div className="composer-footer"><div className="composer-hint"><Sparkles size={14} /> {teamSettings.mode === 'chat' ? "Один агент отвечает без запуска задач" : "Интенсивность " + teamSettings.intensity + "% · активные агенты по настройкам"}</div><button className="primary-button" type="submit" disabled={!task.trim() || isSubmitting}>{isSubmitting ? (teamSettings.mode === 'chat' ? 'Отвечаем…' : 'Команда работает…') : (teamSettings.mode === 'chat' ? 'Отправить' : 'Запустить команду')} <Send size={15} /></button></div>
             </form>
+            {teamSettings.mode !== 'chat' && isSubmitting && <div className="task-progress" role="status" aria-live="polite"><span className="working-pulse"/><div><strong>Команда работает над задачей</strong><span>{reviewStatus || 'Агенты анализируют запрос и готовят результат…'}</span></div></div>}
             {taskError && <div className="task-error" role="alert">{taskError}</div>}
+            {reviewFailure && <section className="review-failure-panel" aria-live="polite">
+              <div className="review-failure-heading"><ShieldCheck size={17}/><strong>Подробности проверки команды</strong></div>
+              {reviewFailure.summary && <p className="review-failure-summary">{reviewFailure.summary}</p>}
+              {reviewFailure.issues.length > 0 ? <div className="review-failure-section"><strong>Замечания ревьюеров</strong><ul>{reviewFailure.issues.map((issue, index) => <li key={index}>{typeof issue === 'string' ? issue : (issue.message || issue.description || JSON.stringify(issue))}</li>)}</ul></div> : <p className="review-failure-muted">Сервер не передал список отдельных замечаний.</p>}
+              {reviewFailure.northReview && <div className="review-failure-section"><strong>Cohere North · независимая проверка</strong><p>{reviewFailure.northReview.summary || (reviewFailure.northReview.approved ? 'Одобрено' : 'Не одобрено')}</p>{Array.isArray(reviewFailure.northReview.issues) && reviewFailure.northReview.issues.length > 0 && <ul>{reviewFailure.northReview.issues.map((issue, index) => <li key={index}>{typeof issue === 'string' ? issue : (issue.message || issue.description || JSON.stringify(issue))}</li>)}</ul>}</div>}
+              <p className="review-failure-footnote">Изменения не сохранены в GitHub. Исправления можно запускать после разбора замечаний.</p>
+            </section>}
             {lastPlan && <div className="generated-plan">
               <div className="plan-header"><div><span className="eyebrow">ПЛАН · {lastPlan.model}</span><h3>{lastPlan.summary}</h3></div><div className="plan-model-stack"><span className="plan-model">{lastPlan.model}</span><span className={lastPlan.fallbackUsed ? 'model-route fallback' : 'model-route'}>{lastPlan.fallbackUsed ? 'Резервное переключение' : 'Основная модель'}</span></div></div>
               <div className={lastPlan.fallbackUsed ? 'model-info fallback' : 'model-info'}>{lastPlan.fallbackUsed ? <>Основная модель <strong>{lastPlan.primaryModel}</strong> была недоступна. Ответ получен от резервной модели <strong>{lastPlan.model}</strong>.</> : <>Запрос выполнен основной моделью <strong>{lastPlan.model}</strong>. Резервная модель не потребовалась.</>}</div>
