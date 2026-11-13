@@ -204,7 +204,7 @@ describe("AI Studio Worker", () => {
 
     const sessionResponse = await worker.fetch(new Request("https://studio.test/api/session", { headers: { cookie } }), { ...env, TASKS: store });
     assert.deepEqual(await sessionResponse.json(), {
-      authenticated: true, isOwner: false, role: "user", authConfigured: true, telegramAuthConfigured: true
+      authenticated: true, isOwner: false, role: "user", telegramUserId: 123456789, authConfigured: true, telegramAuthConfigured: true
     });
 
     const blocked = await worker.fetch(new Request("https://studio.test/api/chat", {
