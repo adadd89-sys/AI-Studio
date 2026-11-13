@@ -8,6 +8,7 @@ import {
 
 const navigation = [
   { label: 'Обзор', icon: LayoutDashboard },
+  { label: 'Чат с ИИ', icon: MessageCircle },
   { label: 'Проекты', icon: FolderKanban },
   { label: 'Команда ИИ', icon: Users },
   { label: 'Процессы', icon: Workflow },
@@ -17,9 +18,9 @@ const navigation = [
 ];
 
 const agents = [
-  { name: 'Gemini 4 Hydrogen', model: 'Google Gemini API · резерв: Gemini 3.8 Flash', role: 'Руководитель и координатор', tone: 'blue', logo: 'https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/googlegemini.svg', key: 'gemini', detail: 'Разбирает запрос, формирует техническое задание, распределяет работу и объединяет результаты.' },
+  { name: 'Gemini 4 Hydrogen', model: 'Google Gemini API · резерв: Gemini 3.8 Flash', role: 'Руководитель и координатор', tone: 'blue', logo: 'data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20100%20100%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22g%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%221%22%20y2%3D%221%22%3E%3Cstop%20stop-color%3D%22%238E75FF%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%2349C6F5%22%2F%3E%3C%2FlinearGradient%3E%3C%2Fdefs%3E%3Cpath%20fill%3D%22url(%23g)%22%20d%3D%22M50%203C55%2028%2072%2045%2097%2050C72%2055%2055%2072%2050%2097C45%2072%2028%2055%203%2050C28%2045%2045%2028%2050%203Z%22%2F%3E%3C%2Fsvg%3E', key: 'gemini', detail: 'Разбирает запрос, формирует техническое задание, распределяет работу и объединяет результаты.' },
   { name: 'Gemma 4 26B', model: 'Cloudflare Workers AI · @cf/google/gemma-4-26b-a4b-it', role: 'Аналитик и контроль качества', tone: 'green', logo: 'https://ai.google.dev/gemma/images/gemma_sq.png', key: 'gemma', detail: 'Независимо проверяет планы и код, выявляет риски, ошибки и недостающие тесты.' },
-  { name: 'Qwen 3.8 27B', model: 'Cloudflare Workers AI · @cf/qwen/qwen3.8-27b', role: 'Основной разработчик', tone: 'violet', logo: 'https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/qwen.svg', key: 'qwen', detail: 'Проектирует архитектуру, пишет и исправляет код.' },
+  { name: 'Qwen 3.8 27B', model: 'Cloudflare Workers AI · @cf/qwen/qwen3.8-27b', role: 'Основной разработчик', tone: 'violet', logo: 'data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20100%20100%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22q%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%221%22%20y2%3D%221%22%3E%3Cstop%20stop-color%3D%22%2335C7F3%22%2F%3E%3Cstop%20offset%3D%22.55%22%20stop-color%3D%22%237568F6%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%23B66BFF%22%2F%3E%3C%2FlinearGradient%3E%3C%2Fdefs%3E%3Cpath%20fill%3D%22url(%23q)%22%20fill-rule%3D%22evenodd%22%20d%3D%22M50%208a42%2042%200%201%200%200%2084a42%2042%200%201%200%200-84Zm0%2018a24%2024%200%201%201%200%2048a24%2024%200%201%201%200-48Z%22%2F%3E%3Cpath%20fill%3D%22url(%23q)%22%20d%3D%22m64%2064%2029%2029H75L55%2073z%22%2F%3E%3C%2Fsvg%3E', key: 'qwen', detail: 'Проектирует архитектуру, пишет и исправляет код.' },
   { name: 'Cohere North Mini Code', model: 'OpenRouter · cohere/north-mini-code:free', role: 'Дополнительный разработчик', tone: 'orange', logo: 'https://cohere.com/apple-touch-icon.png', key: 'north', detail: 'Резервный кодовый агент. Нужен бесплатный ключ OpenRouter в секретах Cloudflare.' }
 ];
 
@@ -668,13 +669,13 @@ function App() {
         <nav className="navigation">
           {navigation.map(item => {
             const Icon = item.icon;
-            return <button key={item.label} className={active === item.label ? 'nav-item active' : 'nav-item'} onClick={() => setActive(item.label)}>
+            return <button key={item.label} className={active === item.label ? 'nav-item active' : 'nav-item'} onClick={() => { setActive(item.label); updateTeamSetting('mode', item.label === 'Чат с ИИ' ? 'chat' : 'normal'); }}>
               <Icon size={17} /><span>{item.label}</span>{item.label === 'Процессы' && tasks.length > 0 && <i>{tasks.length}</i>}
             </button>;
           })}
         </nav>
         <div className="sidebar-bottom">
-          <button className="nav-item" onClick={() => setActive('Настройки')}><Settings2 size={17} /><span>Настройки</span></button>
+          <button className="nav-item" onClick={() => { setActive('Настройки'); updateTeamSetting('mode','normal'); }}><Settings2 size={17} /><span>Настройки</span></button>
           <div className="github-card">
             <div className="github-top"><GitBranch size={15} /><span>GitHub workspace</span><span className="online-dot" /></div>
             <strong>adadd89-sys / AI-Studio</strong>
@@ -691,7 +692,19 @@ function App() {
         </header>
 
         <div className="page-content">
-          {active === 'Проекты' ? <section className="projects-page">
+          {active === 'Чат с ИИ' ? <section className="task-panel chat-mode chat-page">
+            <div className="chat-page-heading"><div><div className="eyebrow"><MessageCircle size={14}/> ЛИЧНЫЙ ДИАЛОГ</div><h1>Чат с ИИ</h1><p>Отдельное пространство для общения с выбранным агентом</p></div><div className="chat-agent-indicator"><span className="working-pulse"/>{teamSettings.agents.gemini ? 'Gemini · основной агент' : teamSettings.agents.qwen ? 'Qwen · основной агент' : 'Активный агент'}</div></div>
+            <div className="chat-thread" ref={chatThreadRef} aria-live="polite">
+              {chatMessages.length === 0 && <div className="chat-empty"><div className="chat-empty-orb"><BrainCircuit size={25}/></div><strong>С чего начнём?</strong><span>Напишите сообщение — ИИ ответит прямо здесь.</span></div>}
+              {chatMessages.map((item,index) => <div key={index} className={'chat-message ' + item.role}><span>{item.role === 'user' ? 'Вы' : item.agent || 'AI Studio'}</span><p>{item.content || (item.role === 'assistant' ? <span className="typing-dots"><i/><i/><i/></span> : '')}</p></div>)}
+              {(chatLoading || chatStatus) && <div className={'chat-working ' + (chatLoading ? '' : chatStatus.startsWith('Не удалось') ? 'error' : 'complete')} role="status"><span className={chatLoading ? 'working-pulse' : chatStatus.startsWith('Не удалось') ? 'working-error' : 'working-check'}>{chatLoading ? '' : chatStatus.startsWith('Не удалось') ? '!' : '✓'}</span><span>{chatStatus || 'Модель готовит ответ…'}</span></div>}
+            </div>
+            <form onSubmit={submitTask} className="chat-composer">
+              <textarea value={task} onChange={e => setTask(e.target.value)} placeholder="Напишите сообщение…" rows={3}/>
+              <div className="composer-footer"><div className="composer-hint"><Sparkles size={14}/> Один агент отвечает без запуска задач</div><button className="primary-button" type="submit" disabled={!task.trim() || chatLoading}>{chatLoading ? 'Отвечаем…' : 'Отправить'} <Send size={15}/></button></div>
+            </form>
+            {taskError && <div className="task-error" role="alert">{taskError}</div>}
+          </section> : active === 'Проекты' ? <section className="projects-page">
             <div className="section-heading"><div><div className="eyebrow">ОБЩИЕ ДАННЫЕ · TELEGRAM CLOUD</div><h2>{detailProjectId ? 'Карточка проекта' : 'Мои проекты'}</h2></div><FolderKanban size={22}/></div>
             {detailProjectId ? (() => {
               const project = projects.find(item => item.id === detailProjectId);
@@ -774,24 +787,19 @@ function App() {
             <div className="settings-card"><div className="settings-title"><div><strong>OpenRouter · North Mini Code</strong><span>Бесплатный уровень модели</span></div></div><p className="settings-note">Бесплатная квота OpenRouter зависит от действующих правил аккаунта. Здесь учитываются только вызовы, которые AI Studio сможет подтвердить; остаток аккаунта не предполагается.</p><a className="external-dashboard-link" href="https://openrouter.ai/activity" target="_blank" rel="noreferrer">Открыть активность OpenRouter ↗</a></div>
             <div className="settings-card"><strong>История задач</strong>{visibleUsage.length ? <div className="usage-history">{visibleUsage.map(item => <div key={item.id}><span>{new Date(item.at).toLocaleString('ru-RU')}</span><strong>{item.task}</strong><small>{item.agents?.join(' · ') || 'Состав команды не записан'} · {item.intensity}%</small></div>)}</div> : <p className="settings-note">За выбранный период задач пока нет.</p>}</div>
           </section> : <>
-          {teamSettings.mode !== 'chat' && <section className="welcome-row">
+          <section className="welcome-row">
             <div><div className="eyebrow"><Sparkles size={14} /> ВАША AI-КОМАНДА</div><h1>{active === 'Обзор' ? 'Всё начинается с идеи.' : title}</h1><p>Ставьте задачу — команда ИИ поможет превратить её в готовый продукт.</p></div>
             <div className="system-status"><span className="status-pulse" /> Система готова к работе</div>
-          </section>}
+          </section>
 
-          <section className={teamSettings.mode === 'chat' ? 'task-panel chat-mode' : 'task-panel'}>
-            <div className="task-panel-heading"><div className="task-icon"><Command size={18} /></div><div><h2>{teamSettings.mode === 'chat' ? 'Чат с ИИ' : 'Новая задача'}</h2><p>{teamSettings.mode === 'chat' ? 'Общайтесь с выбранной моделью — ответ появится постепенно' : 'Опишите, что нужно создать или улучшить'}</p></div><div className="task-mode-switch" aria-label="Режим работы"><button type="button" className={teamSettings.mode === 'chat' ? 'active' : ''} onClick={() => updateTeamSetting('mode','chat')}><MessageCircle size={14}/> Чат</button><button type="button" className={teamSettings.mode !== 'chat' ? 'active' : ''} onClick={() => updateTeamSetting('mode','normal')}><Terminal size={14}/> Задача</button></div></div>
-            {teamSettings.mode === 'chat' && <div className="chat-thread" ref={chatThreadRef} aria-live="polite">
-              {chatMessages.length === 0 && <div className="chat-empty"><div className="chat-empty-orb"><BrainCircuit size={25}/></div><strong>С чего начнём?</strong><span>Напишите сообщение — команда ИИ ответит в этом чате.</span></div>}
-              {chatMessages.map((item,index) => <div key={index} className={'chat-message ' + item.role}><span>{item.role === 'user' ? 'Вы' : item.agent || 'AI Studio'}</span><p>{item.content || (item.role === 'assistant' ? <span className="typing-dots"><i/><i/><i/></span> : '')}</p></div>)}
-              {(chatLoading || chatStatus) && <div className={'chat-working ' + (chatLoading ? '' : chatStatus.startsWith('Не удалось') ? 'error' : 'complete')} role="status"><span className={chatLoading ? 'working-pulse' : chatStatus.startsWith('Не удалось') ? 'working-error' : 'working-check'}>{chatLoading ? '' : chatStatus.startsWith('Не удалось') ? '!' : '✓'}</span><span>{chatStatus || 'Модель готовит ответ…'}</span></div>}
-            </div>}
+          <section className="task-panel">
+            <div className="task-panel-heading"><div className="task-icon"><Command size={18} /></div><div><h2>Новая задача</h2><p>Опишите, что нужно создать или улучшить</p></div></div>
             <form onSubmit={submitTask}>
-              {teamSettings.mode !== 'chat' && <label className="task-project-select">Проект <select value={selectedProjectId} onChange={event => setSelectedProjectId(event.target.value)}><option value="">Без проекта</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>}
-              <textarea value={task} onChange={e => setTask(e.target.value)} placeholder={teamSettings.mode === 'chat' ? "Напишите сообщение команде…" : "Например: создай Telegram-бота для записи клиентов, продумай архитектуру, напиши код и проверь его..."} rows={3} />
-              <div className="composer-footer"><div className="composer-hint"><Sparkles size={14} /> {teamSettings.mode === 'chat' ? "Один агент отвечает без запуска задач" : "Интенсивность " + teamSettings.intensity + "% · активные агенты по настройкам"}</div><button className="primary-button" type="submit" disabled={!task.trim() || isSubmitting}>{isSubmitting ? (teamSettings.mode === 'chat' ? 'Отвечаем…' : 'Команда работает…') : (teamSettings.mode === 'chat' ? 'Отправить' : 'Запустить команду')} <Send size={15} /></button></div>
+              <label className="task-project-select">Проект <select value={selectedProjectId} onChange={event => setSelectedProjectId(event.target.value)}><option value="">Без проекта</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>
+              <textarea value={task} onChange={e => setTask(e.target.value)} placeholder="Например: создай Telegram-бота для записи клиентов, продумай архитектуру, напиши код и проверь его..." rows={3} />
+              <div className="composer-footer"><div className="composer-hint"><Sparkles size={14} /> Интенсивность {teamSettings.intensity}% · активные агенты по настройкам</div><button className="primary-button" type="submit" disabled={!task.trim() || isSubmitting}>{isSubmitting ? 'Команда работает…' : 'Запустить команду'} <Send size={15} /></button></div>
             </form>
-            {teamSettings.mode !== 'chat' && isSubmitting && <div className="task-progress" role="status" aria-live="polite"><span className="working-pulse"/><div><strong>Команда работает над задачей</strong><span>{reviewStatus || 'Агенты анализируют запрос и готовят результат…'}</span></div></div>}
+            {isSubmitting && <div className="task-progress" role="status" aria-live="polite"><span className="working-pulse"/><div><strong>Команда работает над задачей</strong><span>{reviewStatus || 'Агенты анализируют запрос и готовят результат…'}</span></div></div>}
             {taskError && <div className="task-error" role="alert">{taskError}</div>}
             {reviewFailure && <section className="review-failure-panel" aria-live="polite">
               <div className="review-failure-heading"><ShieldCheck size={17}/><strong>Подробности проверки команды</strong></div>
