@@ -10,14 +10,14 @@ function scaledTokenBudget(intensity, minimum, maximum) {
   return Math.round(minimum + (maximum - minimum) * level / 100);
 }
 
-async function fetchGeminiWithRetry(url, options) {
+async function fetchGeminiWithRetry(url, options, retryOptions = {}) {
   const retryable = new Set([408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524]);
   let lastError;
   let lastResponse = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const response = await fetch(url, options);
-      if (response.ok || !retryable.has(response.status)) return response;
+      if (response.ok || !retryable.has(response.status) || (response.status === 524 && retryOptions.retry524 !== true)) return response;
       lastResponse = response;
       lastError = Object.assign(new Error("Gemini API временно недоступен (HTTP " + response.status + ")."), { status: response.status });
     } catch (error) {
@@ -1043,7 +1043,8 @@ export default {
                   contents: [{ role: "user", parts: [{ text: instruction }] }],
                   generationConfig: { responseMimeType: "application/json", temperature: 0.1, maxOutputTokens }
                 })
-              }
+              },
+              { retry524: true }
             );
             if (!response.ok) {
               lastResult = { response, parsed: null, raw: "", model: candidateModel };
