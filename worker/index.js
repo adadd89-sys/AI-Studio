@@ -7,7 +7,7 @@ const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" };
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: JSON_HEADERS });
 
 async function authenticated(request, env) {
-  if (!env.APP_PASSWORD || !env.SESSION_SECRET) return json({ error: "Авторизация AI Studio не настроена." }, 503);
+  if (!env.SESSION_SECRET || !(env.APP_PASSWORD || env.TELEGRAM_BOT_TOKEN)) return json({ error: "Авторизация AI Studio не настроена." }, 503);
   const cookie = request.headers.get("cookie") || "";
   const token = cookie.split(";").map(part => part.trim())
     .find(part => part.startsWith("ai_studio_session="))?.slice("ai_studio_session=".length);
@@ -62,7 +62,7 @@ export default {
       if (teamSettings.mode === "chat") return json({ error: "Для режима общения используйте отдельный маршрут /api/chat." }, 400);
       if (!teamSettings.agents.qwen && !teamSettings.agents.north) return json({ error: "Включите Qwen или Cohere North Mini Code — нужен хотя бы один разработчик." }, 400);
       if (teamSettings.agents.gemini && !env.GEMINI_API_KEY) return json({ error: "Gemini включён, но GEMINI_API_KEY не настроен." }, 503);
-      if ((teamSettings.agents.qwen || teamSettings.agents.gemma) && !env.AI) return json({ error: "Для включённых Qwen/Gemma требуется Cloudflare Workers AI." }, 503);
+      if ((teamSettings.agents.qwen || (teamSettings.agents.gemma && teamSettings.intensity >= 50)) && !env.AI) return json({ error: "Для включённых Qwen/Gemma требуется Cloudflare Workers AI." }, 503);
       if (teamSettings.agents.north && !env.OPENROUTER_API_KEY) return json({ error: "Cohere North Mini Code включён, но OPENROUTER_API_KEY ещё не добавлен в секреты Cloudflare." }, 503);
       if (!task) return json({ error: "Опишите задачу." }, 400);
       if (task.length > 6000) return json({ error: "Задача слишком длинная. Максимум — 6000 символов." }, 413);
