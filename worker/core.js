@@ -1227,7 +1227,7 @@ export default {
           changedPaths.add(change.path);
           mergedChanges.push({ ...change, assignedAgent: result.agent });
         }
-        const implementation = { summary: delegationResults.map(item => item.summary).filter(Boolean).join(" · ") || plan.summary, changes: mergedChanges };
+        let implementation = { summary: delegationResults.map(item => item.summary).filter(Boolean).join(" · ") || plan.summary, changes: mergedChanges };
         const delegation = delegationResults.map(({ agent, task: assignedTask, allowedPaths, summary, changes }) => ({
           agent, task: assignedTask, allowedPaths, summary, files: changes.map(change => change.path)
         }));
