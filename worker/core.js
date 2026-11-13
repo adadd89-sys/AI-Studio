@@ -530,7 +530,7 @@ export default {
             },
             {
               role: "user",
-              content: "Исходная задача пользователя:\\n" + task + "\\n\\nПлан Gemini:\\n" + plan
+              content: "Исходная задача пользователя:\n" + task + "\n\nПлан Gemini:\n" + plan
             }
           ],
           max_completion_tokens: 1200,
@@ -586,7 +586,7 @@ export default {
             },
             {
               role: "user",
-              content: "Исходная задача пользователя:\\n" + task + "\\n\\nПлан, который нужно проверить:\\n" + plan
+              content: "Исходная задача пользователя:\n" + task + "\n\nПлан, который нужно проверить:\n" + plan
             }
           ],
           max_completion_tokens: 1200,
@@ -843,7 +843,7 @@ export default {
             ]);
           } finally { if (timer) clearTimeout(timer); }
         }
-        const teamPrompt = "Дай независимую краткую проверку ответа ведущего агента. Найди одну полезную поправку, риск или дополнительный аспект; если ответ корректен, подтверди это. Не повторяй ответ целиком. До 2 коротких предложений, по-русски.\\n\\nЗапрос пользователя: " + message + "\\n\\nОтвет ведущего агента: " + reply.slice(0, 5000);
+        const teamPrompt = "Дай независимую краткую проверку ответа ведущего агента. Найди одну полезную поправку, риск или дополнительный аспект; если ответ корректен, подтверди это. Не повторяй ответ целиком. До 2 коротких предложений, по-русски.\n\nЗапрос пользователя: " + message + "\n\nОтвет ведущего агента: " + reply.slice(0, 5000);
         if (agent !== "qwen" && enabled.qwen !== false && env.AI) {
           consultationRequests++;
           consultTasks.push(withConsultTimeout((async () => {
@@ -897,7 +897,7 @@ export default {
         if (consultTasks.length) {
           await Promise.allSettled(consultTasks);
           if (consultations.length) {
-            reply = reply.trim() + "\\n\\n**Проверка команды**\\n" + consultations.map(item => "**" + item.agent + ":** " + item.note).join("\\n\\n");
+            reply = reply.trim() + "\n\n**Проверка команды**\n" + consultations.map(item => "**" + item.agent + ":** " + item.note).join("\n\n");
           }
         }
 
@@ -1348,7 +1348,7 @@ export default {
           const reviewInput = JSON.stringify({ task, plan, changes: changes.map(change => ({ path: change.path, reason: change.reason || "", content: change.content.slice(0, 14000) })) });
           const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent?key=" + encodeURIComponent(env.GEMINI_API_KEY), {
             method: "POST", headers: { "content-type": "application/json" },
-            body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "Ты — независимый технический ревьюер AI Studio (" + GEMINI_AGENT_LABELS[agentKey] + "). Критически проверь изменения на соответствие задаче, ошибки, безопасность и регрессии. Верни только JSON: {\"approved\":true,\"summary\":\"...\",\"issues\":[\"...\"]}. approved=true только если изменения пригодны к сохранению. Не утверждай, что запускал тесты.\\n\\n" + reviewInput }] }], generationConfig: { responseMimeType: "application/json", maxOutputTokens: scaledTokenBudget(intensity, 700, 1400) } })
+            body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "Ты — независимый технический ревьюер AI Studio (" + GEMINI_AGENT_LABELS[agentKey] + "). Критически проверь изменения на соответствие задаче, ошибки, безопасность и регрессии. Верни только JSON: {\"approved\":true,\"summary\":\"...\",\"issues\":[\"...\"]}. approved=true только если изменения пригодны к сохранению. Не утверждай, что запускал тесты.\n\n" + reviewInput }] }], generationConfig: { responseMimeType: "application/json", maxOutputTokens: scaledTokenBudget(intensity, 700, 1400) } })
           });
           if (!response.ok) throw new Error(GEMINI_AGENT_LABELS[agentKey] + " review вернул HTTP " + response.status);
           const payload = await response.json();
@@ -1450,7 +1450,7 @@ export default {
         try {
           const pr = await githubRequest(env, "/repos/" + GITHUB_REPO + "/pulls", { method: "POST", body: JSON.stringify({
             title: ("AI Studio: " + (implementation.summary || plan.summary)).slice(0, 200),
-            body: "Подготовлено командой AI Studio.\\n\\nЗадача: " + task.slice(0, 3000) + "\\n\\nИсполнители: " + delegation.map(item => item.agent + " — " + item.files.join(", ")).join("; "),
+            body: "Подготовлено командой AI Studio.\n\nЗадача: " + task.slice(0, 3000) + "\n\nИсполнители: " + delegation.map(item => item.agent + " — " + item.files.join(", ")).join("; "),
             head: branch, base: "main", draft: false
           }) });
           pullRequest = { number: pr.number, url: pr.html_url, state: pr.state };
