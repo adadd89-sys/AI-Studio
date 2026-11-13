@@ -1643,3 +1643,9 @@ export default {
     return json({ error: "Статические файлы ещё не настроены." }, 404);
   }
 };
+
+
+// Compare serialized task snapshots before persisting status changes to KV.
+export function hasTaskSnapshotChanged(previous, next) {
+  return JSON.stringify(previous) !== JSON.stringify(next);
+}
