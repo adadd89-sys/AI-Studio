@@ -368,9 +368,14 @@ function App() {
         if (statusData.status === 'errored' || statusData.status === 'terminated') {
           throw new Error(statusData.error?.message || 'Асинхронная задача завершилась с ошибкой.');
         }
+        const activeNames = [];
+        if (teamSettings.agents.gemini) activeNames.push('Gemini');
+        activeNames.push(teamSettings.agents.qwen ? 'Qwen' : 'Cohere North Mini Code');
+        if (teamSettings.agents.gemma && teamSettings.intensity >= 50) activeNames.push('Gemma');
+        if (teamSettings.agents.north && teamSettings.intensity >= 50) activeNames.push('North');
         setReviewStatus(statusData.status === 'queued'
           ? 'Задача в очереди Cloudflare Workflows…'
-          : 'Gemini, Qwen и Gemma выполняют задачу. Это может занять несколько минут…');
+          : activeNames.join(', ') + ' выполняют задачу. Это может занять несколько минут…');
       }
       if (!completed) {
         throw new Error('Задача всё ещё выполняется в фоне. Идентификатор: ' + started.jobId + '. Обновите страницу позже и проверьте статус.');
@@ -395,8 +400,9 @@ function App() {
       setQwenReview(actualAgents.includes('qwen') || actualAgents.includes('north') ? { ok: true, review: data.qwenReview || 'Изменения подготовлены.' } : null);
       setGemmaReview(actualAgents.includes('gemma') ? { ok: true, review: data.gemmaReview || 'Проверка завершена.' } : null);
       const count = (data.filesChanged || []).length;
+      const developerName = actualAgents.includes('qwen') ? 'Qwen' : actualAgents.includes('north') ? 'Cohere North Mini Code' : 'разработчик';
       setReviewStatus(data.branch
-        ? 'Проверка пройдена. Qwen подготовил ' + count + ' файл(ов) в отдельной GitHub-ветке.'
+        ? 'Проверка пройдена. ' + developerName + ' подготовил ' + count + ' файл(ов) в отдельной GitHub-ветке.'
         : 'Анализ завершён. Изменения файлов не потребовались.');
       setTasks(current => [{
         id: Date.now(),
@@ -508,7 +514,7 @@ function App() {
                 <a href={'https://github.com/adadd89-sys/AI-Studio/compare/main...' + executionResult.branch} target="_blank" rel="noreferrer">Посмотреть сравнение с main →</a>
               </div>}
               <div className="review-kit">
-                <div className="review-kit-heading"><strong>Автоматическая проверка команды</strong><span>Gemma 4 + Qwen 3.8</span></div>
+                <div className="review-kit-heading"><strong>Результаты работы команды</strong><span>{(executionResult?.agentsUsed || []).map(key => ({gemini:'Gemini',qwen:'Qwen',gemma:'Gemma',north:'North'}[key] || key)).join(' · ') || 'Нет данных об агентах'}</span></div>
                 <p>{reviewStatus || "Оба агента автоматически получают план Gemini и независимо проверяют его."}</p>
                 <div className="agent-reviews">
                   <div className="agent-review"><strong>Gemma 4 · Cloudflare Workers AI</strong>{gemmaReview ? (gemmaReview.ok ? <p>{gemmaReview.review}</p> : <p className="review-error">{gemmaReview.error}</p>) : executionResult && !executionResult.agentsUsed?.includes('gemma') ? <span>Не запускалась: проверка не требовалась при выбранной интенсивности или не было изменений.</span> : <span>Ожидает проверки…</span>}</div>
