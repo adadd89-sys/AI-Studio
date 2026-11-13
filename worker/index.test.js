@@ -699,9 +699,15 @@ describe("AI Studio Worker", () => {
     const originalFetch = globalThis.fetch;
     const cookie = await getSessionCookie();
     const writes = [];
+    const requestedGeminiModels = [];
     globalThis.fetch = async (url, options = {}) => {
       const target = String(url);
       if (target.includes("generativelanguage.googleapis.com")) {
+        const model = decodeURIComponent(target.match(/models\/([^:]+):generateContent/)?.[1] || "");
+        requestedGeminiModels.push(model);
+        if (model === "gemini-4-hydrogen" || model === "gemini-3.8-flash") {
+          return new Response(JSON.stringify({ error: { message: "Model overloaded" } }), { status: 503 });
+        }
         return new Response(JSON.stringify({
           candidates: [{ content: { parts: [{ text: JSON.stringify({
             summary: "Добавить экран настроек",
@@ -768,6 +774,14 @@ describe("AI Studio Worker", () => {
       assert.equal(response.status, 200);
       const result = await response.json();
       assert.equal(result.ok, true);
+      assert.equal(result.model, "gemini-3.6-flash");
+      assert.equal(result.primaryModel, "gemini-4-hydrogen");
+      assert.equal(result.fallbackUsed, true);
+      assert.deepEqual(requestedGeminiModels, [
+        "gemini-4-hydrogen", "gemini-4-hydrogen", "gemini-4-hydrogen",
+        "gemini-3.8-flash", "gemini-3.8-flash", "gemini-3.8-flash",
+        "gemini-3.6-flash"
+      ]);
       assert.match(result.branch, /^ai-studio\/task-/);
       assert.deepEqual(result.filesChanged.map(file => file.path).sort(), ["src/new-screen.jsx", "src/theme.css"]);
       assert.match(result.gemmaReview, /Gemma: Изменения корректны\./);
