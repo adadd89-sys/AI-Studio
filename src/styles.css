@@ -437,3 +437,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
  .cpu-ambient{right:-24vw;width:100vw;height:75dvh;top:3vh;opacity:.42}
  .cpu-chip{box-shadow:0 0 48px rgba(125,105,255,.2),inset 0 0 26px rgba(113,145,255,.13)}
 }
+
+.chat-working.error{color:#ffaaaa}
+.working-error{display:grid;place-items:center;flex:0 0 16px;width:16px;height:16px;border-radius:50%;background:rgba(225,94,94,.18);color:#ffaaaa;font-size:11px;font-weight:800}
