@@ -821,3 +821,19 @@ button,input,textarea,select { font-family: 'Inter', sans-serif; }
 @keyframes startup-spin{to{transform:rotate(360deg)}}@keyframes startup-pulse{0%,100%{opacity:.7;filter:brightness(1);transform:scale(1)}50%{opacity:1;filter:brightness(1.5);transform:scale(1.05)}}@keyframes startup-float{0%,100%{transform:translate3d(0,0,0);opacity:.3}50%{transform:translate3d(12px,-18px,0);opacity:1}}
 @media(max-height:720px){.startup-core{width:145px;height:145px;margin:0 0 12px}.startup-logo{width:70px;height:70px}.startup-checks{gap:6px;margin:16px 0}.startup-check{padding:8px 10px}}
 @media(prefers-reduced-motion:reduce){.startup-screen *{animation-duration:.01ms!important;animation-iteration-count:1!important;transition:none!important}}
+
+
+/* Owner-only Telegram user administration */
+.user-add-form{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;align-items:end;gap:10px}
+.user-add-form label{display:grid;gap:6px;color:#aeb5c5;font-size:9px}
+.user-add-form input{width:100%;min-width:0;border:1px solid #343b4b;background:#0f131b;color:#e9eaf0;border-radius:8px;padding:11px;font:inherit;font-size:10px;outline:none}
+.user-add-form input:focus{border-color:#7565c3;box-shadow:0 0 0 3px #7968c31c}
+.user-management-list{display:grid}
+.user-management-row{display:flex;align-items:center;gap:11px;padding:11px 0;border-top:1px solid #282d39}
+.user-management-avatar{width:34px;height:34px;display:grid;place-items:center;border-radius:10px;background:#30294d;color:#c3b4ff;font-weight:700;font-size:12px;flex-shrink:0}
+.user-management-copy{display:grid;gap:4px;min-width:0;flex:1}
+.user-management-copy strong{font-size:10px;color:#e2e5ee}
+.user-management-copy span{font-size:9px;color:#858d9e}
+.user-remove-button{border:1px solid #5b373b;border-radius:7px;background:#2a1b20;color:#e6a5aa;padding:8px 10px;font-size:9px;white-space:nowrap}
+.user-remove-button:disabled{opacity:.45;cursor:not-allowed}
+@media(max-width:650px){.user-add-form{grid-template-columns:1fr}.user-management-row{align-items:flex-start;flex-wrap:wrap}.user-remove-button{margin-left:45px}}

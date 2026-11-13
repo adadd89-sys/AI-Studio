@@ -3,7 +3,7 @@ import {
   Bot, BrainCircuit, Check, ChevronDown, ChevronRight,
   CircleHelp, Code2, Command, FolderKanban, GitBranch, LayoutDashboard,
   MessageSquare, Plus, Send, Settings2, ShieldCheck, Sparkles, Terminal,
-  Users, Workflow, Zap, FileText, Save, RefreshCw, GitCommit, X, Gauge, BarChart3, MessageCircle
+  Users, UserPlus, Workflow, Zap, FileText, Save, RefreshCw, GitCommit, X, Gauge, BarChart3, MessageCircle
 } from 'lucide-react';
 
 const navigation = [
@@ -13,7 +13,8 @@ const navigation = [
   { label: 'Команда ИИ', icon: Users },
   { label: 'Процессы', icon: Workflow },
   { label: 'Код и файлы', icon: Code2 },
-  { label: 'Расход ресурсов', icon: BarChart3 }
+  { label: 'Расход ресурсов', icon: BarChart3 },
+  { label: 'Пользователи', icon: UserPlus, ownerOnly: true }
 ];
 
 const agents = [
@@ -232,6 +233,100 @@ function readTeamSettings() {
   } catch { return DEFAULT_TEAM_SETTINGS; }
 }
 
+function UsersAdmin() {
+  const [users, setUsers] = useState([]);
+  const [telegramUserId, setTelegramUserId] = useState('');
+  const [name, setName] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  async function request(method = 'GET', body) {
+    const response = await fetch('/api/admin/users', {
+      method,
+      headers: body ? { 'content-type': 'application/json' } : {},
+      ...(body ? { body: JSON.stringify(body) } : {})
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || 'Не удалось выполнить операцию.');
+    return data;
+  }
+
+  async function loadUsers() {
+    setLoading(true);
+    setError('');
+    try {
+      const data = await request();
+      setUsers(data.users || []);
+    } catch (err) {
+      setError(err.message || 'Не удалось загрузить пользователей.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { loadUsers(); }, []);
+
+  async function addUser(event) {
+    event.preventDefault();
+    if (busy || !/^\d{1,20}$/.test(telegramUserId.trim())) return;
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const data = await request('POST', { telegramUserId: telegramUserId.trim(), name: name.trim() || 'Пользователь' });
+      setUsers(data.users || []);
+      setTelegramUserId('');
+      setName('');
+      setNotice('Пользователь добавлен. Он сможет войти через Telegram Mini App.');
+    } catch (err) {
+      setError(err.message || 'Не удалось добавить пользователя.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeUser(user) {
+    if (busy || !window.confirm('Закрыть доступ для ' + (user.name || user.telegramUserId) + '?')) return;
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const data = await request('DELETE', { telegramUserId: user.telegramUserId });
+      setUsers(data.users || []);
+      setNotice('Доступ пользователя отозван. Его действующая сессия также перестанет проходить проверку.');
+    } catch (err) {
+      setError(err.message || 'Не удалось удалить пользователя.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <section className="settings-page users-admin-page">
+    <div className="section-heading"><div><div className="eyebrow">OWNER CONTROL · ACCESS MANAGEMENT</div><h2>Пользователи Telegram</h2></div><UserPlus size={22}/></div>
+    <div className="settings-card">
+      <div className="settings-title"><div><strong>Добавить пользователя</strong><span>Доступ выдаётся только по числовому Telegram ID. Username не подходит.</span></div></div>
+      <form className="user-add-form" onSubmit={addUser}>
+        <label>Telegram ID<input inputMode="numeric" value={telegramUserId} onChange={event => setTelegramUserId(event.target.value.replace(/[^0-9]/g, '').slice(0,20))} placeholder="Например, 123456789" required /></label>
+        <label>Имя для списка<input value={name} onChange={event => setName(event.target.value)} placeholder="Имя пользователя" maxLength={80}/></label>
+        <button className="primary-button" type="submit" disabled={busy || !/^\d{1,20}$/.test(telegramUserId.trim())}>{busy ? 'Сохраняем…' : 'Добавить доступ'} <UserPlus size={15}/></button>
+      </form>
+      {error && <div className="task-error" role="alert">{error}</div>}
+      {notice && <p className="settings-note">{notice}</p>}
+    </div>
+    <div className="settings-card">
+      <div className="settings-title"><div><strong>Разрешённые аккаунты</strong><span>У них есть доступ к AI-чату, но нет доступа к GitHub-редактору и запуску изменений кода.</span></div><span>{users.length}</span></div>
+      {loading ? <p className="settings-note">Загружаем список…</p> : users.length ? <div className="user-management-list">{users.map(user => <div className="user-management-row" key={user.telegramUserId}>
+        <div className="user-management-avatar">{(user.name || 'П').slice(0,1).toUpperCase()}</div>
+        <div className="user-management-copy"><strong>{user.name || 'Пользователь'}</strong><span>Telegram ID: {user.telegramUserId}</span></div>
+        <button className="user-remove-button" type="button" onClick={() => removeUser(user)} disabled={busy}>Отозвать доступ</button>
+      </div>)}</div> : <p className="settings-note">Пока никого не добавлено. Ты остаёшься единственным пользователем.</p>}
+    </div>
+    <div className="workspace-notice"><ShieldCheck size={15}/> Владелец сохраняет полный контроль. Все проверки прав выполняются на сервере, а не только в интерфейсе.</div>
+  </section>;
+}
+
 function App() {
   const [active, setActive] = useState('Обзор');
   const [task, setTask] = useState('');
@@ -255,6 +350,7 @@ function App() {
   const [geminiHealth, setGeminiHealth] = useState(null);
   const [geminiCallStatus, setGeminiCallStatus] = useState(null);
   const [authState, setAuthState] = useState('checking');
+  const [sessionUser, setSessionUser] = useState(null);
   const [splashDone, setSplashDone] = useState(false);
   const [splashProgress, setSplashProgress] = useState(0);
   const [loginPassword, setLoginPassword] = useState('');
@@ -438,12 +534,16 @@ function App() {
     ]).then(async ([health, session]) => {
       if (!active) return;
       setGeminiHealth(health);
-      if (session.authenticated) { setAuthState('authenticated'); return; }
+      if (session.authenticated) { setSessionUser(session.user || null); setAuthState('authenticated'); return; }
       const telegram = window.Telegram?.WebApp;
       if (telegram?.initData && health.telegramAuthConfigured) {
         try {
           const response = await fetch('/api/telegram-login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ initData: telegram.initData }) });
-          if (response.ok) { if (active) setAuthState('authenticated'); return; }
+          if (response.ok) {
+            const current = await fetch('/api/session').then(result => result.json()).catch(() => null);
+            if (active) { setSessionUser(current?.user || null); setAuthState('authenticated'); }
+            return;
+          }
         } catch { /* Fall back to the existing password login. */ }
       }
       if (active) setAuthState(health.passwordAuthConfigured ? 'login' : health.telegramAuthConfigured ? 'error' : 'setup');
@@ -683,7 +783,7 @@ function App() {
       { label: 'Подготовка к работе', detail: 'Инициализация рабочего пространства', done: splashProgress >= 18 },
       { label: 'Проверка ИИ-агентов', detail: geminiHealth ? 'Конфигурация провайдеров получена' : 'Проверяем доступность конфигурации', done: Boolean(geminiHealth) },
       { label: 'Готовность к анализу данных', detail: 'Подготовка аналитических модулей', done: splashProgress >= 66 },
-      { label: 'Проверка авторизации Telegram', detail: authState === 'authenticated' ? 'Личность подтверждена' : authState === 'checking' ? 'Проверяем подпись Telegram' : 'Проверка завершена · доступ ограничен владельцем', done: authState !== 'checking', failed: authState !== 'checking' && authState !== 'authenticated' }
+      { label: 'Проверка авторизации Telegram', detail: authState === 'authenticated' ? 'Личность подтверждена' : authState === 'checking' ? 'Проверяем подпись Telegram' : 'Проверка завершена · проверяем разрешения аккаунта', done: authState !== 'checking', failed: authState !== 'checking' && authState !== 'authenticated' }
     ];
     return <div className="startup-screen">
       <div className="startup-grid" aria-hidden="true" />
@@ -697,7 +797,7 @@ function App() {
     </div>;
   }
   if (authState !== 'authenticated') {
-    return <div className="login-screen"><form className="login-card" onSubmit={login}><div className="brand-mark"><BrainCircuit size={22} /></div><div className="eyebrow">ЗАЩИЩЁННЫЙ ДОСТУП</div><h1>AI Studio</h1><p>{authState === 'checking' ? 'Проверяем авторизацию…' : authState === 'setup' ? 'Авторизация ещё не настроена. Добавьте APP_PASSWORD и SESSION_SECRET в секреты Cloudflare Worker.' : authState === 'error' ? 'Не удалось подтвердить Telegram-вход. Откройте Mini App через Telegram или настройте парольный вход.' : 'Введите личный пароль, чтобы открыть рабочее пространство.'}</p>{authState === 'login' && <><input type="password" autoComplete="current-password" value={loginPassword} onChange={event => setLoginPassword(event.target.value)} placeholder="Пароль доступа" /><button className="primary-button" type="submit" disabled={!loginPassword || isLoggingIn}>{isLoggingIn ? 'Входим…' : 'Войти'} <Send size={15} /></button></>}{loginError && <div className="task-error">{loginError}</div>}</form></div>;
+    return <div className="login-screen"><form className="login-card" onSubmit={login}><div className="brand-mark"><BrainCircuit size={22} /></div><div className="eyebrow">ЗАЩИЩЁННЫЙ ДОСТУП</div><h1>AI Studio</h1><p>{authState === 'checking' ? 'Проверяем авторизацию…' : authState === 'setup' ? 'Авторизация Telegram ещё не настроена. Проверьте секреты TELEGRAM_BOT_TOKEN, TELEGRAM_OWNER_ID и SESSION_SECRET в Cloudflare Worker.' : authState === 'error' ? 'Не удалось подтвердить Telegram-вход. Убедитесь, что ваш аккаунт добавлен владельцем и откройте Mini App через Telegram.' : 'Откройте Mini App через Telegram, чтобы войти в рабочее пространство.'}</p>{authState === 'login' && <><input type="password" autoComplete="current-password" value={loginPassword} onChange={event => setLoginPassword(event.target.value)} placeholder="Пароль доступа" /><button className="primary-button" type="submit" disabled={!loginPassword || isLoggingIn}>{isLoggingIn ? 'Входим…' : 'Войти'} <Send size={15} /></button></>}{loginError && <div className="task-error">{loginError}</div>}</form></div>;
   }
   return (
     <div className="app-shell">
@@ -714,7 +814,7 @@ function App() {
         </div>
         <div className="nav-caption">РАБОЧЕЕ ПРОСТРАНСТВО</div>
         <nav className="navigation">
-          {navigation.map(item => {
+          {navigation.filter(item => !item.ownerOnly || sessionUser?.role === 'owner').filter(item => item.label !== 'Код и файлы' || sessionUser?.role === 'owner').map(item => {
             const Icon = item.icon;
             return <button key={item.label} className={active === item.label ? 'nav-item active' : 'nav-item'} onClick={() => { setActive(item.label); updateTeamSetting('mode', item.label === 'Чат с ИИ' ? 'chat' : 'normal'); }}>
               <Icon size={17} /><span>{item.label}</span>{item.label === 'Процессы' && tasks.length > 0 && <i>{tasks.length}</i>}
@@ -728,18 +828,18 @@ function App() {
             <strong>adadd89-sys / AI-Studio</strong>
             <small>Ветка main</small>
           </div>
-          <div className="profile"><div className="profile-avatar">Р</div><div><strong>Руководитель</strong><span>Владелец студии</span></div><ChevronDown size={15} /></div>
+          <div className="profile"><div className="profile-avatar">{(sessionUser?.name || 'П').slice(0,1).toUpperCase()}</div><div><strong>{sessionUser?.role === 'owner' ? 'Руководитель' : (sessionUser?.name || 'Пользователь')}</strong><span>{sessionUser?.role === 'owner' ? 'Владелец студии' : 'Пользователь'}</span></div><ChevronDown size={15} /></div>
         </div>
       </aside>
 
       <main className={active === 'Чат с ИИ' ? "main-area chat-active" : "main-area"}>
         <header className="topbar">
           <div className="breadcrumbs"><span>AI Studio</span><ChevronRight size={14} /><strong>{title}</strong></div>
-          <div className="topbar-right"><span className="date-label">{greeting}</span><button className="icon-button" aria-label="Помощь"><CircleHelp size={17} /></button><div className="top-avatar">Р</div></div>
+          <div className="topbar-right"><span className="date-label">{greeting}</span><button className="icon-button" aria-label="Помощь"><CircleHelp size={17} /></button><div className="top-avatar">{(sessionUser?.name || 'П').slice(0,1).toUpperCase()}</div></div>
         </header>
 
         <div className={active === 'Чат с ИИ' ? "page-content chat-content" : "page-content"}>
-          {active === 'Чат с ИИ' ? <section className="task-panel chat-mode chat-page">
+          {active === 'Пользователи' && sessionUser?.role === 'owner' ? <UsersAdmin /> : active === 'Чат с ИИ' ? <section className="task-panel chat-mode chat-page">
             <div className="chat-page-heading"><div><div className="eyebrow"><MessageCircle size={14}/> ЛИЧНЫЙ ДИАЛОГ</div><h1>Чат с ИИ</h1><p>Общение, анализ проекта и работа с GitHub через Gemini</p></div><div className="chat-agent-indicator"><span className="working-pulse"/>{teamSettings.agents.gemini ? 'Gemini · основной агент' : teamSettings.agents.qwen ? 'Qwen · основной агент' : 'Активный агент'}</div></div>
             <div className="chat-thread" ref={chatThreadRef} aria-live="polite">
               {chatMessages.length === 0 && <div className="chat-empty"><div className="chat-empty-orb"><BrainCircuit size={25}/></div><strong>С чего начнём?</strong><span>Напишите сообщение — ИИ ответит прямо здесь.</span></div>}

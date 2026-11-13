@@ -42,7 +42,7 @@ npm run build
 
 ## Access protection
 
-AI Studio is a private, owner-only Telegram Mini App. The Worker accepts a session only when its signed Telegram user ID matches the configured `TELEGRAM_OWNER_ID`. Password login is disabled. The owner allowlist is enforced by the server on every protected API route; an old password or Telegram session belonging to another account is rejected.
+AI Studio uses Telegram identity and server-enforced roles. The configured `TELEGRAM_OWNER_ID` is the owner and always has full access. The owner can add or revoke other Telegram accounts from the **Пользователи** section using their numeric Telegram IDs. Approved users can use the AI workspace and chat, but cannot open the GitHub editor, call code-execution endpoints, or access Gemini's GitHub write tools. These restrictions are enforced by the Worker, not just by hiding interface controls. Password login is disabled. The allowlist is stored in the existing `TASKS` KV namespace under a dedicated key.
 
 Configure these as encrypted Cloudflare Worker secrets:
 
@@ -50,7 +50,7 @@ Configure these as encrypted Cloudflare Worker secrets:
 - `TELEGRAM_OWNER_ID`: your numeric Telegram user ID (not your username).
 - `SESSION_SECRET`: a random secret of at least 32 bytes.
 
-If `TELEGRAM_OWNER_ID` is missing or invalid, authentication fails closed and no account can sign in. Telegram Mini App initData signatures and their 10-minute freshness are verified before the owner ID is checked. Sessions are HttpOnly, Secure, SameSite=Strict, and expire after 7 days. Never commit secrets or send them in chat.
+If `TELEGRAM_OWNER_ID` is missing or invalid, authentication fails closed and no account can sign in. Telegram Mini App initData signatures and their 10-minute freshness are verified before the owner or allowlist membership is checked. Revoking a user removes them from the allowlist, so their next API request is rejected even if their browser still holds an unexpired session. Sessions are HttpOnly, Secure, SameSite=Strict, and expire after 7 days. Never commit secrets or send them in chat.
 
 ## Gemini setup
 

@@ -166,7 +166,7 @@ describe("AI Studio Worker", () => {
     const response = await worker.fetch(new Request("https://studio.test/api/session", {
       headers: { cookie }
     }), env);
-    assert.deepEqual(await response.json(), { authenticated: true, authConfigured: true, telegramAuthConfigured: true });
+    assert.deepEqual(await response.json(), { authenticated: true, user: { telegramUserId: 987654321, role: "owner", name: "Владелец" }, authConfigured: true, telegramAuthConfigured: true });
   });
 
   it("disables password login even when APP_PASSWORD is configured", async () => {
@@ -846,6 +846,102 @@ describe("AI Studio Worker", () => {
       assert.equal(payload.agent, "gemini36");
       assert.equal(payload.agentLabel, "Gemini 3.6 Flash");
       assert.match(requestedUrl, /models\/gemini-3\.6-flash:generateContent/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("lets the owner add Telegram users and keeps code editing owner-only", async () => {
+    const ownerCookie = await getSessionCookie();
+    const stored = new Map();
+    const TASKS = {
+      async get(key) { return stored.get(key) || null; },
+      async put(key, value) { stored.set(key, value); }
+    };
+    const adminResponse = await worker.fetch(new Request("https://studio.test/api/admin/users", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: ownerCookie, origin: "https://studio.test" },
+      body: JSON.stringify({ telegramUserId: "1122334455", name: "Тестовый пользователь" })
+    }), { ...env, TASKS });
+    assert.equal(adminResponse.status, 201);
+    assert.equal((await adminResponse.json()).user.telegramUserId, "1122334455");
+
+    const initData = await createTelegramInitData(1122334455);
+    const loginResponse = await worker.fetch(new Request("https://studio.test/api/telegram-login", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://studio.test" },
+      body: JSON.stringify({ initData })
+    }), { ...env, TASKS });
+    assert.equal(loginResponse.status, 200);
+    const userCookie = loginResponse.headers.get("set-cookie").split(";")[0];
+
+    const sessionResponse = await worker.fetch(new Request("https://studio.test/api/session", {
+      headers: { cookie: userCookie }
+    }), { ...env, TASKS });
+    const session = await sessionResponse.json();
+    assert.equal(session.authenticated, true);
+    assert.equal(session.user.role, "user");
+    assert.equal(session.user.name, "Тестовый пользователь");
+
+    const adminDenied = await worker.fetch(new Request("https://studio.test/api/admin/users", {
+      headers: { cookie: userCookie }
+    }), { ...env, TASKS });
+    assert.equal(adminDenied.status, 403);
+
+    const executeDenied = await worker.fetch(new Request("https://studio.test/api/execute", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: userCookie, origin: "https://studio.test" },
+      body: JSON.stringify({ task: "Попробуй изменить код" })
+    }), { ...env, TASKS, GITHUB_TOKEN: "test-token" });
+    assert.equal(executeDenied.status, 401);
+
+    const githubDenied = await worker.fetch(new Request("https://studio.test/api/github/tree", {
+      headers: { cookie: userCookie }
+    }), { ...env, TASKS, GITHUB_TOKEN: "test-token" });
+    assert.equal(githubDenied.status, 401);
+  });
+
+  it("does not expose Gemini GitHub write tools to an approved Telegram user", async () => {
+    const stored = new Map([["access:users:v1", JSON.stringify([
+      { telegramUserId: "1122334455", name: "Участник", active: true }
+    ])]]);
+    const TASKS = { async get(key) { return stored.get(key) || null; } };
+    const initData = await createTelegramInitData(1122334455);
+    const loginResponse = await worker.fetch(new Request("https://studio.test/api/telegram-login", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://studio.test" },
+      body: JSON.stringify({ initData })
+    }), { ...env, TASKS });
+    const cookie = loginResponse.headers.get("set-cookie").split(";")[0];
+    const originalFetch = globalThis.fetch;
+    const geminiBodies = [];
+    let turn = 0;
+    globalThis.fetch = async (url, options = {}) => {
+      if (String(url).includes("generativelanguage.googleapis.com")) {
+        geminiBodies.push(JSON.parse(options.body));
+        const parts = turn++ === 0
+          ? [{ functionCall: { name: "write_repository_file", args: { path: "README.md", branch: "ai-studio/attempt", content: "tampered", message: "attempt" } } }]
+          : [{ text: "Я могу помочь с анализом, но не могу изменять код." }];
+        return new Response(JSON.stringify({ candidates: [{ content: { parts } }] }), {
+          status: 200, headers: { "content-type": "application/json" }
+        });
+      }
+      throw new Error("Non-Gemini network call is not allowed for regular users.");
+    };
+    try {
+      const response = await worker.fetch(new Request("https://studio.test/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+        body: JSON.stringify({ message: "Покажи код и измени файл в GitHub", history: [], teamSettings: {
+          intensity: 40, agents: { gemini: true, qwen: false, gemma: false, north: false }
+        } })
+      }), { ...env, TASKS });
+      assert.equal(response.status, 200);
+      assert.equal(geminiBodies.length, 2);
+      assert.equal(geminiBodies[0].tools, undefined);
+      assert.equal(geminiBodies[0].contents.some(item => item.parts?.some(part => String(part.text || "").includes("СНИМОК РЕПОЗИТОРИЯ"))), false);
+      const toolResponse = geminiBodies[1].contents.at(-1).parts[0].functionResponse.response;
+      assert.match(toolResponse.error, /только владельцу/i);
     } finally {
       globalThis.fetch = originalFetch;
     }
