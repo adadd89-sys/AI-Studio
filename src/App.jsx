@@ -864,6 +864,7 @@ function App() {
               {lastPlan.questions?.length > 0 && <div className="plan-notes"><strong>Нужно уточнить</strong>{lastPlan.questions.map((question, index) => <span key={index}>{question}</span>)}</div>}
               {executionResult?.branch && <div className="plan-notes">
                 <strong>Результат работы команды</strong>
+                {executionResult.model && <span>Планирование: <strong>{executionResult.model}</strong>{executionResult.fallbackUsed ? ' · резервная модель после сбоя основной' : ' · основная модель'}</span>}
                 {executionResult.pullRequest?.url && <a href={executionResult.pullRequest.url} target="_blank" rel="noreferrer">Открыть Pull Request #{executionResult.pullRequest.number} →</a>}
                 {executionResult.pullRequestError && <span className="review-error">Ветка создана, но PR не открылся: {executionResult.pullRequestError}</span>}
                 {(executionResult.delegation || []).map((item, index) => <span key={item.agent + index}><strong>{item.agent === "qwen" ? "Qwen" : "Cohere North"} — отдельное задание:</strong> {item.task} · файлы: {(item.files || []).join(", ") || "изменений нет"}</span>)}

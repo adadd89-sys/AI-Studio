@@ -10,14 +10,14 @@ function scaledTokenBudget(intensity, minimum, maximum) {
   return Math.round(minimum + (maximum - minimum) * level / 100);
 }
 
-async function fetchGeminiWithRetry(url, options) {
+async function fetchGeminiWithRetry(url, options, retryOptions = {}) {
   const retryable = new Set([408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524]);
   let lastError;
   let lastResponse = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const response = await fetch(url, options);
-      if (response.ok || !retryable.has(response.status) || response.status === 524) return response;
+      if (response.ok || !retryable.has(response.status) || (response.status === 524 && retryOptions.retry524 !== true)) return response;
       lastResponse = response;
       lastError = Object.assign(new Error("Gemini API временно недоступен (HTTP " + response.status + ")."), { status: response.status });
     } catch (error) {
@@ -1024,53 +1024,62 @@ export default {
       async function callGemini(prompt) {
         usage.agents.push("gemini");
         const baseTokenBudget = scaledTokenBudget(intensity, 768, 2048);
-        async function call(model, instruction, maxOutputTokens) {
+        const modelChain = [...new Set([
+          primaryModel, fallbackModel, GEMINI_AGENT_MODELS.gemini36,
+          GEMINI_AGENT_MODELS.geminiLite, GEMINI_AGENT_MODELS.gemini31Lite
+        ].filter(model => FREE_GEMINI_MODELS.has(model)))];
+        async function call(startModel, instruction, maxOutputTokens) {
           usage.requests++;
-          const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) +
-            ":generateContent?key=" + encodeURIComponent(env.GEMINI_API_KEY), {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({
-                contents: [{ role: "user", parts: [{ text: instruction }] }],
-                generationConfig: { responseMimeType: "application/json", temperature: 0.1, maxOutputTokens }
-              })
-            });
-          if (!response.ok) return { response, parsed: null, raw: "" };
-          const payload = await response.json();
-          const raw = payload?.candidates?.[0]?.content?.parts?.map(part => part.text || "").join("").trim() || "";
-          return { response, parsed: parseJsonObject(raw), raw, finishReason: payload?.candidates?.[0]?.finishReason || null, blockReason: payload?.promptFeedback?.blockReason || null };
+          const startIndex = Math.max(0, modelChain.indexOf(startModel));
+          let lastResult = null;
+          for (const candidateModel of modelChain.slice(startIndex)) {
+            const response = await fetchGeminiWithRetry(
+              "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(candidateModel) +
+                ":generateContent?key=" + encodeURIComponent(env.GEMINI_API_KEY),
+              {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                  contents: [{ role: "user", parts: [{ text: instruction }] }],
+                  generationConfig: { responseMimeType: "application/json", temperature: 0.1, maxOutputTokens }
+                })
+              },
+              { retry524: true }
+            );
+            if (!response.ok) {
+              lastResult = { response, parsed: null, raw: "", model: candidateModel };
+              if ([408,429,500,502,503,504,520,521,522,523,524].includes(response.status)) continue;
+              return lastResult;
+            }
+            const payload = await response.json();
+            const raw = payload?.candidates?.[0]?.content?.parts?.map(part => part.text || "").join("").trim() || "";
+            return { response, parsed: parseJsonObject(raw), raw, model: candidateModel,
+              finishReason: payload?.candidates?.[0]?.finishReason || null,
+              blockReason: payload?.promptFeedback?.blockReason || null };
+          }
+          return lastResult || { response: new Response("Gemini models unavailable", { status: 503 }), parsed: null, raw: "", model: modelChain[modelChain.length - 1] };
         }
 
-        let model = primaryModel;
-        let result = await call(model, prompt, baseTokenBudget);
-        let fallbackUsed = false;
-        if (!result.response.ok && [429,500,502,503,504].includes(result.response.status) && fallbackModel !== primaryModel) {
-          model = fallbackModel;
-          fallbackUsed = true;
-          result = await call(model, prompt, baseTokenBudget);
-        }
+        let result = await call(primaryModel, prompt, baseTokenBudget);
+        let model = result.model;
+        let fallbackUsed = model !== primaryModel;
         if (!result.response.ok) {
-          const error = new Error("Gemini API вернул ошибку " + result.response.status);
+          const error = new Error("Все доступные модели Gemini недоступны. Последняя ошибка HTTP " + result.response.status + ".");
           error.status = result.response.status;
+          error.model = model;
           throw error;
         }
 
-        // One bounded repair attempt handles occasional prose, markdown fences, or truncated JSON.
         if (!result.parsed) {
-          const repairPrompt = prompt + "\\n\\nВАЖНО: предыдущая попытка не дала корректный JSON. Повтори ответ заново и верни один полностью завершённый JSON-объект без Markdown, вступления и пояснений. Соблюдай все требуемые поля. Сделай значения краткими, чтобы ответ гарантированно поместился.";
+          const repairPrompt = prompt + "\n\nВАЖНО: предыдущая попытка не дала корректный JSON. Повтори ответ заново и верни один полностью завершённый JSON-объект без Markdown, вступления и пояснений. Соблюдай все требуемые поля. Сделай значения краткими, чтобы ответ гарантированно поместился.";
           result = await call(model, repairPrompt, Math.max(baseTokenBudget, 3072));
-          // If the repair request hits a transient outage, try the configured fallback model
-          // once rather than failing the whole task after the primary model's JSON issue.
-          if (!result.response.ok && [429,500,502,503,504].includes(result.response.status) &&
-              model === primaryModel && fallbackModel !== primaryModel) {
-            model = fallbackModel;
-            fallbackUsed = true;
-            result = await call(model, repairPrompt, Math.max(baseTokenBudget, 3072));
-          }
+          model = result.model;
+          fallbackUsed = fallbackUsed || model !== primaryModel;
         }
         if (!result.response.ok) {
-          const error = new Error("Повторная попытка Gemini завершилась ошибкой HTTP " + result.response.status);
+          const error = new Error("Повторная попытка и резервные модели Gemini завершились ошибкой HTTP " + result.response.status + ".");
           error.status = result.response.status;
+          error.model = model;
           throw error;
         }
         if (!result.parsed) {
