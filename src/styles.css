@@ -400,3 +400,15 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
  .cpu-chip,.cpu-chip:after,.cpu-orbit,.cpu-signal,.chat-empty-orb,.typing-dots i,.working-pulse{animation:none!important}
  .chat-mode .chat-message{animation:none!important}
 }
+
+
+/* Detailed feedback when the AI review team rejects a change */
+.review-failure-panel{margin-top:14px;padding:16px;border:1px solid rgba(245,112,112,.32);border-radius:14px;background:linear-gradient(145deg,rgba(74,31,42,.28),rgba(27,24,35,.88));color:#e8eaf3;animation:chat-appear .28s ease both}
+.review-failure-heading{display:flex;align-items:center;gap:9px;color:#ffaaa9;font-size:13px}
+.review-failure-summary{margin:11px 0;color:#d9dbea;font-size:12px;line-height:1.65}
+.review-failure-section{margin-top:13px;padding-top:12px;border-top:1px solid rgba(170,155,180,.15)}
+.review-failure-section>strong{display:block;color:#c9c1ff;font-size:11px;margin-bottom:8px}
+.review-failure-section p,.review-failure-section li{font-size:11px;line-height:1.65;color:#c4cad8}
+.review-failure-section ul{margin:7px 0 0;padding-left:19px;display:grid;gap:6px}
+.review-failure-muted,.review-failure-footnote{font-size:10px;line-height:1.6;color:#929bad}
+.review-failure-footnote{margin:14px 0 0;padding-top:11px;border-top:1px solid rgba(170,155,180,.15)}
