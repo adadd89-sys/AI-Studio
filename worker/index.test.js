@@ -844,6 +844,36 @@ describe("AI Studio Worker", () => {
     } finally { globalThis.fetch = originalFetch; }
   });
 
+  it("hands off to enabled Qwen when all Gemini models return HTTP 524", async () => {
+    const cookie = await getSessionCookie();
+    const originalFetch = globalThis.fetch;
+    const requestedModels = [];
+    globalThis.fetch = async url => {
+      const target = String(url);
+      const model = target.match(/models\/([^:]+):generateContent/)?.[1];
+      requestedModels.push(model);
+      return new Response("upstream timeout", { status: 524 });
+    };
+    const testEnv = { ...env, AI: { run: async (model, options) => {
+      assert.equal(model, "@cf/qwen/qwen3.8-27b");
+      assert.match(options.messages.at(-1).content, /Привет/);
+      return { response: "Ответил Qwen после недоступности Gemini." };
+    } } };
+    try {
+      const response = await worker.fetch(new Request("https://studio.test/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+        body: JSON.stringify({ message: "Привет", teamSettings: { agents: { gemini: true, qwen: true, gemma: false, north: false } } })
+      }), testEnv);
+      const payload = await response.json();
+      assert.equal(response.status, 200);
+      assert.equal(payload.reply, "Ответил Qwen после недоступности Gemini.");
+      assert.equal(payload.agentLabel, "Qwen (резерв)");
+      assert.deepEqual(payload.agentsUsed, ["gemini", "qwen"]);
+      assert.deepEqual(requestedModels, ["gemini-4-hydrogen", "gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"]);
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
   it("switches to Gemini fallback after repeated 524 timeout responses in chat", async () => {
     const cookie = await getSessionCookie();
     const originalFetch = globalThis.fetch;
