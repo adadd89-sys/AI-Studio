@@ -411,8 +411,13 @@ export default {
     }
 
     if (url.pathname === "/api/session" && request.method === "GET") {
+      const identity = await getSessionIdentity(request, env.SESSION_SECRET);
+      const authenticated = Boolean(identity && await isAllowedTelegramUser(identity.telegramUserId, env.TELEGRAM_OWNER_ID, env.TASKS));
+      const isOwner = authenticated && String(identity.telegramUserId) === String(env.TELEGRAM_OWNER_ID);
       return json({
-        authenticated: await isValidSession(request, env.SESSION_SECRET, env.TELEGRAM_OWNER_ID, env.TASKS, true),
+        authenticated,
+        isOwner,
+        role: isOwner ? "owner" : authenticated ? "user" : null,
         authConfigured: hasAuthProvider(env),
         telegramAuthConfigured: hasAuthProvider(env)
       });
