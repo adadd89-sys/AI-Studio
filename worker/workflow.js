@@ -1,5 +1,5 @@
 import { WorkflowEntrypoint } from "cloudflare:workers";
-import worker from "./core.js";
+import worker, { assertWorkflowExecutionSucceeded } from "./core.js";
 
 async function sign(value, secret) {
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret),
@@ -13,21 +13,23 @@ async function sign(value, secret) {
 export class AIStudioWorkflow extends WorkflowEntrypoint {
   async run(event, step) {
     const task = event.payload?.task;
+    const teamSettings = event.payload?.teamSettings || {};
     if (typeof task !== "string" || !task.trim()) throw new Error("Workflow получил пустую задачу.");
     const jobId = event.instanceId;
-    return step.do("Выполнение команды Gemini, Qwen и Gemma", {
+    return step.do("Выполнение команды AI Studio", {
       retries: { limit: 0, delay: "1 second" }
     }, async () => {
       const timestamp = Date.now();
-      const signature = await sign(jobId + "." + timestamp + "." + task, this.env.SESSION_SECRET);
+      const signedPayload = JSON.stringify({ task, teamSettings });
+      const signature = await sign(jobId + "." + timestamp + "." + signedPayload, this.env.SESSION_SECRET);
       const request = new Request("https://studio.internal/api/execute-internal", {
         method: "POST",
         headers: { "content-type": "application/json", "x-ai-studio-workflow-signature": signature },
-        body: JSON.stringify({ task, jobId, timestamp })
+        body: JSON.stringify({ task, teamSettings, jobId, timestamp })
       });
       const response = await worker.fetch(request, this.env);
       const data = await response.json().catch(() => ({ error: "Worker вернул некорректный JSON." }));
-      return { httpStatus: response.status, data };
+      return assertWorkflowExecutionSucceeded(response.status, data);
     });
   }
 }

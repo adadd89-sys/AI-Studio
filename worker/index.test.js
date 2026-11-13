@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import worker from "./core.js";
+import worker, { assertWorkflowExecutionSucceeded, getSessionIdentity, hasAuthProvider } from "./core.js";
 
 const env = { APP_PASSWORD: "correct-horse", SESSION_SECRET: "test-session-secret", GEMINI_API_KEY: "test-key" };
 
@@ -26,6 +26,26 @@ function planRequest(cookie, body = { task: "Создай сайт" }) {
 }
 
 describe("AI Studio Worker", () => {
+  it("marks workflow execution as failed when the internal worker returns an error", () => {
+    assert.throws(
+      () => assertWorkflowExecutionSucceeded(502, { error: "Qwen вернул пустой ответ." }),
+      /Qwen вернул пустой ответ/
+    );
+    assert.throws(
+      () => assertWorkflowExecutionSucceeded(200, { error: "Частичные изменения не сохранены." }),
+      /Частичные изменения не сохранены/
+    );
+  });
+
+  it("preserves successful workflow output for status polling", () => {
+    const result = assertWorkflowExecutionSucceeded(200, { ok: true, branch: "ai-studio/task-1" });
+    assert.deepEqual(result, { httpStatus: 200, data: { ok: true, branch: "ai-studio/task-1" } });
+  });
+
+  it("accepts Telegram as an authentication provider without APP_PASSWORD", () => {
+    assert.equal(hasAuthProvider({ SESSION_SECRET: "secret", TELEGRAM_BOT_TOKEN: "bot-token", APP_PASSWORD: "" }), true);
+    assert.equal(hasAuthProvider({ SESSION_SECRET: "secret", APP_PASSWORD: "" }), false);
+  });
   it("returns health status without exposing secrets", async () => {
     const response = await worker.fetch(new Request("https://studio.test/api/health"), {});
     assert.equal(response.status, 200);
@@ -34,6 +54,9 @@ describe("AI Studio Worker", () => {
       service: "ai-studio-api",
       modelConfigured: false,
       qwenConfigured: false,
+      openrouterConfigured: false,
+      telegramAuthConfigured: false,
+      passwordAuthConfigured: false,
       githubConfigured: false,
       authConfigured: false
     });
@@ -41,6 +64,68 @@ describe("AI Studio Worker", () => {
 
   it("rejects planning requests without a session", async () => {
     const response = await worker.fetch(planRequest("", { task: "Создай сайт" }), env);
+    assert.equal(response.status, 401);
+  });
+
+
+  it("authenticates a Telegram Mini App user with a valid signed initData payload", async () => {
+    const botToken = "123456:telegram-test-token";
+    const entries = [
+      ["auth_date", String(Math.floor(Date.now() / 1000))],
+      ["query_id", "AAE-test-query"],
+      ["user", JSON.stringify({ id: 987654321, first_name: "Test" })]
+    ];
+    const checkString = [...entries].sort(([left],[right]) => left.localeCompare(right)).map(([key,value]) => key + "=" + value).join("\n");
+    const webAppKey = await crypto.subtle.importKey("raw", new TextEncoder().encode("WebAppData"), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const secret = await crypto.subtle.sign("HMAC", webAppKey, new TextEncoder().encode(botToken));
+    const validationKey = await crypto.subtle.importKey("raw", secret, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const digest = new Uint8Array(await crypto.subtle.sign("HMAC", validationKey, new TextEncoder().encode(checkString)));
+    const hash = [...digest].map(byte => byte.toString(16).padStart(2, "0")).join("");
+    const initData = new URLSearchParams([...entries, ["hash", hash]]).toString();
+    const response = await worker.fetch(new Request("https://studio.test/api/telegram-login", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://studio.test" },
+      body: JSON.stringify({ initData })
+    }), { SESSION_SECRET: env.SESSION_SECRET, TELEGRAM_BOT_TOKEN: botToken });
+    assert.equal(response.status, 200);
+    const cookie = response.headers.get("set-cookie").split(";")[0];
+    const identity = await getSessionIdentity(new Request("https://studio.test/", { headers: { cookie } }), env.SESSION_SECRET);
+    assert.deepEqual(identity, { telegramUserId: 987654321 });
+    const session = await worker.fetch(new Request("https://studio.test/api/session", { headers: { cookie } }), {
+      SESSION_SECRET: env.SESSION_SECRET, TELEGRAM_BOT_TOKEN: botToken
+    });
+    assert.equal((await session.json()).authenticated, true);
+  });
+
+
+  it("rejects validly signed Telegram initData older than ten minutes", async () => {
+    const botToken = "123456:telegram-test-token";
+    const entries = [
+      ["auth_date", String(Math.floor(Date.now() / 1000) - 601)],
+      ["query_id", "AAE-stale-query"],
+      ["user", JSON.stringify({ id: 987654321, first_name: "Test" })]
+    ];
+    const checkString = [...entries].sort(([left],[right]) => left.localeCompare(right)).map(([key,value]) => key + "=" + value).join("\n");
+    const webAppKey = await crypto.subtle.importKey("raw", new TextEncoder().encode("WebAppData"), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const secret = await crypto.subtle.sign("HMAC", webAppKey, new TextEncoder().encode(botToken));
+    const validationKey = await crypto.subtle.importKey("raw", secret, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const digest = new Uint8Array(await crypto.subtle.sign("HMAC", validationKey, new TextEncoder().encode(checkString)));
+    const hash = [...digest].map(byte => byte.toString(16).padStart(2, "0")).join("");
+    const initData = new URLSearchParams([...entries, ["hash", hash]]).toString();
+    const response = await worker.fetch(new Request("https://studio.test/api/telegram-login", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://studio.test" },
+      body: JSON.stringify({ initData })
+    }), { SESSION_SECRET: env.SESSION_SECRET, TELEGRAM_BOT_TOKEN: botToken });
+    assert.equal(response.status, 401);
+  });
+
+  it("rejects tampered Telegram Mini App initData", async () => {
+    const response = await worker.fetch(new Request("https://studio.test/api/telegram-login", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://studio.test" },
+      body: JSON.stringify({ initData: "auth_date=1&user=%7B%22id%22%3A1%7D&hash=" + "0".repeat(64) })
+    }), { SESSION_SECRET: env.SESSION_SECRET, TELEGRAM_BOT_TOKEN: "test-token" });
     assert.equal(response.status, 401);
   });
 
@@ -58,7 +143,7 @@ describe("AI Studio Worker", () => {
     const response = await worker.fetch(new Request("https://studio.test/api/session", {
       headers: { cookie }
     }), env);
-    assert.deepEqual(await response.json(), { authenticated: true, authConfigured: true });
+    assert.deepEqual(await response.json(), { authenticated: true, authConfigured: true, telegramAuthConfigured: false });
   });
 
   it("rejects an incorrect password", async () => {
@@ -415,6 +500,136 @@ describe("AI Studio Worker", () => {
     }
   });
 
+
+
+  it("allows Telegram-authenticated sessions to use the chat API without APP_PASSWORD", async () => {
+    const cookie = await getSessionCookie();
+    const response = await worker.fetch(new Request("https://studio.test/api/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+      body: JSON.stringify({
+        message: "Привет",
+        teamSettings: { mode: "chat", intensity: 10, agents: { gemini: false, qwen: true, gemma: false, north: false } }
+      })
+    }), {
+      ...env,
+      APP_PASSWORD: "",
+      TELEGRAM_BOT_TOKEN: "configured-telegram-bot-token",
+      AI: { run: async () => ({ response: "Привет! Я Qwen." }) }
+    });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).agent, "qwen");
+  });
+
+  it("keeps lightweight chat separate from the development workflow", async () => {
+    const cookie = await getSessionCookie();
+    let requestedModel = "";
+    let requestedBudget = 0;
+    const response = await worker.fetch(new Request("https://studio.test/api/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+      body: JSON.stringify({
+        message: "Привет! Давай просто поговорим.",
+        history: [{ role: "user", content: "Предыдущая реплика" }],
+        teamSettings: { mode: "chat", intensity: 10, agents: { gemini: false, qwen: true, gemma: false, north: false } }
+      })
+    }), {
+      ...env,
+      AI: { run: async (model, input) => {
+        requestedModel = model;
+        requestedBudget = input.max_completion_tokens;
+        assert.equal(input.messages.at(-1).content, "Привет! Давай просто поговорим.");
+        return { response: "Привет! Конечно, давай." };
+      } }
+    });
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.equal(result.agent, "qwen");
+    assert.equal(result.reply, "Привет! Конечно, давай.");
+    assert.equal(result.usage.requests, 1);
+    assert.equal(requestedModel, "@cf/qwen/qwen3.8-27b");
+    assert.equal(requestedBudget, 614);
+  });
+
+  it("does not contact a disabled agent in lightweight chat", async () => {
+    const cookie = await getSessionCookie();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => { throw new Error("Disabled Gemini must not be called"); };
+    try {
+      const response = await worker.fetch(new Request("https://studio.test/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+        body: JSON.stringify({ message: "Тест", teamSettings: { mode: "chat", agents: { gemini: false, qwen: true, gemma: false, north: false } } })
+      }), { ...env, AI: { run: async () => ({ response: "Ответ от Qwen." }) } });
+      assert.equal(response.status, 200);
+      assert.equal((await response.json()).agent, "qwen");
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
+
+  it("routes lightweight chat to Cohere North Mini Code when it is the enabled agent", async () => {
+    const cookie = await getSessionCookie();
+    const originalFetch = globalThis.fetch;
+    let sentModel = "";
+    globalThis.fetch = async (url, options) => {
+      assert.match(String(url), /openrouter\.ai\/api\/v1\/chat\/completions/);
+      sentModel = JSON.parse(options.body).model;
+      return new Response(JSON.stringify({ choices: [{ message: { content: "Привет! Я North." } }] }), {
+        status: 200, headers: { "content-type": "application/json" }
+      });
+    };
+    try {
+      const response = await worker.fetch(new Request("https://studio.test/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+        body: JSON.stringify({ message: "Привет", teamSettings: { mode: "chat", agents: { gemini: false, qwen: false, gemma: false, north: true } } })
+      }), { ...env, OPENROUTER_API_KEY: "test-openrouter-key" });
+      assert.equal(response.status, 200);
+      const result = await response.json();
+      assert.equal(result.agent, "north");
+      assert.equal(result.reply, "Привет! Я North.");
+      assert.equal(sentModel, "cohere/north-mini-code:free");
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
+  it("rejects lightweight chat without an enabled agent", async () => {
+    const cookie = await getSessionCookie();
+    const response = await worker.fetch(new Request("https://studio.test/api/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+      body: JSON.stringify({ message: "Тест", teamSettings: { agents: { gemini: false, qwen: false, gemma: false, north: false } } })
+    }), env);
+    assert.equal(response.status, 400);
+  });
+
+  it("allows execution with Gemini disabled when Qwen remains enabled", async () => {
+    const cookie = await getSessionCookie();
+    const response = await worker.fetch(new Request("https://studio.test/api/execute", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+      body: JSON.stringify({ task: "", teamSettings: {
+        intensity: 20, mode: "normal",
+        agents: { gemini: false, qwen: true, gemma: false, north: false }
+      } })
+    }), { ...env, GEMINI_API_KEY: undefined, GITHUB_TOKEN: "test-github-token", AI: { run: async () => ({ response: "{}" }) } });
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).error, /Опишите задачу/);
+  });
+
+  it("allows North-only execution without the Cloudflare AI binding", async () => {
+    const cookie = await getSessionCookie();
+    const response = await worker.fetch(new Request("https://studio.test/api/execute", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+      body: JSON.stringify({ task: "", teamSettings: {
+        intensity: 20, mode: "normal",
+        agents: { gemini: false, qwen: false, gemma: false, north: true }
+      } })
+    }), { ...env, GEMINI_API_KEY: undefined, GITHUB_TOKEN: "test-github-token", AI: undefined, OPENROUTER_API_KEY: "test-openrouter-key" });
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).error, /Опишите задачу/);
+  });
+
   it("rejects autonomous execution without a session", async () => {
     const response = await worker.fetch(new Request("https://studio.test/api/execute", {
       method: "POST",
@@ -505,7 +720,7 @@ describe("AI Studio Worker", () => {
       assert.equal(result.ok, true);
       assert.match(result.branch, /^ai-studio\/task-/);
       assert.deepEqual(result.filesChanged.map(file => file.path), ["src/new-screen.jsx"]);
-      assert.equal(result.gemmaReview, "Изменения корректны.");
+      assert.equal(result.gemmaReview, "Gemma: Изменения корректны.");
       assert.equal(writes.length, 1);
       assert.equal(writes[0].branch, result.branch);
       assert.equal(writes[0].content, btoa("export default function Settings() { return <main>Settings</main>; }"));

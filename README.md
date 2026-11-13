@@ -49,6 +49,34 @@ The Worker protects `POST /api/plan` with a signed, HttpOnly session cookie. Bef
 
 Add both as encrypted **Secrets**, not plain text variables. The session expires after 7 days. Never commit either value or send it in chat. The public health endpoint reveals only whether model/auth secrets are configured; it does not expose their values.
 
+## Telegram login and shared task history
+
+Shared task history is scoped to the verified Telegram user ID. Password-only sessions can still use the private workspace, but cannot read or start tasks that require cross-device history.
+
+For Telegram Mini App login, add these encrypted Worker secrets:
+
+- `TELEGRAM_BOT_TOKEN`: token from the Telegram bot that owns the Mini App.
+- `SESSION_SECRET`: the same strong signing secret used for session cookies.
+
+Create a free Cloudflare Workers KV namespace:
+
+```bash
+npx wrangler kv namespace create AI_STUDIO_TASKS
+```
+
+Copy the returned namespace ID into `wrangler.jsonc`:
+
+```jsonc
+"kv_namespaces": [
+  {
+    "binding": "TASKS",
+    "id": "PASTE_THE_NAMESPACE_ID_HERE"
+  }
+]
+```
+
+Keep the real namespace ID in your private deployment configuration; do not commit credentials. After configuring the binding, deploy the Worker. The app stores up to 100 recent tasks per Telegram account and automatically expires KV records after 90 days. Task status and completed results are refreshed from Cloudflare Workflows when the app polls them. Projects use the same per-user KV namespace and retention window: users can create projects, attach new tasks to a project, and see each project's task count. Project and task records are isolated by verified Telegram user ID; password-only sessions cannot access the shared project/task APIs.
+
 ## Gemini setup
 
 Create a Gemini API key in Google AI Studio and keep it in a Worker secret for deployment:
@@ -75,7 +103,7 @@ The Worker serves the built Vite app and handles `/api/*`. The app has built-in 
 
 ## Planned next
 
-- Persistent projects and task history with Cloudflare D1
+- Persistent projects and richer task metadata
 - Multi-agent orchestration and review cycles
 - GitHub repository operations, testing, and controlled publishing
 - Additional model adapters
