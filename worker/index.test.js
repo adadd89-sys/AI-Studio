@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import worker, { assertWorkflowExecutionSucceeded, getSessionIdentity, hasAuthProvider, normalizeWorkflowTeamSettings } from "./core.js";
+import worker, { assertWorkflowExecutionSucceeded, extractCohereResponseText, getSessionIdentity, hasAuthProvider, normalizeWorkflowTeamSettings, parseCohereChangesResponse } from "./core.js";
 
 const env = {
   APP_PASSWORD: "correct-horse",
@@ -46,6 +46,36 @@ function planRequest(cookie, body = { task: "Создай сайт" }) {
     body: typeof body === "string" ? body : JSON.stringify(body)
   });
 }
+
+
+describe("Cohere North response normalization", () => {
+  it("parses valid OpenRouter JSON content", () => {
+    const p={choices:[{message:{content:'{"changes":[{"path":"src/App.jsx","content":"x"}]}'}}]};
+    assert.equal(parseCohereChangesResponse(p).changes[0].path,"src/App.jsx");
+  });
+  it("parses Markdown-fenced JSON", () => {
+    const p={choices:[{message:{content:'\x60\x60\x60json\\n{"changes":[{"path":"worker/core.js","content":"x"}]}\\n\x60\x60\x60'}}]};
+    assert.equal(parseCohereChangesResponse(p).changes.length,1);
+  });
+  it("extracts multipart message content", () => {
+    const p={choices:[{message:{content:[{type:"text",text:'{"changes":[]}' }]}}]};
+    assert.equal(extractCohereResponseText(p),'{"changes":[]}');
+    assert.deepEqual(parseCohereChangesResponse(p).changes,[]);
+  });
+  it("extracts JSON returned through an OpenRouter tool call", () => {
+    const p={choices:[{message:{content:null,tool_calls:[{function:{arguments:'{"changes":[]}'}}]}}]};
+    assert.equal(extractCohereResponseText(p),'{"changes":[]}');
+    assert.deepEqual(parseCohereChangesResponse(p).changes,[]);
+  });
+  it("rejects ordinary text and empty responses", () => {
+    assert.equal(parseCohereChangesResponse({choices:[{message:{content:"I changed files."}}]}),null);
+    assert.equal(parseCohereChangesResponse({choices:[{message:{content:""}}]}),null);
+  });
+  it("unwraps nested response JSON", () => {
+    const p={choices:[{message:{content:JSON.stringify({result:{changes:[{path:"src/x.js",content:"x"}]}})}}]};
+    assert.equal(parseCohereChangesResponse(p).changes[0].path,"src/x.js");
+  });
+});
 
 describe("AI Studio Worker", () => {
   it("marks workflow execution as failed when the internal worker returns an error", () => {
