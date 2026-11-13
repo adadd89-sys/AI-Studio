@@ -914,11 +914,15 @@ describe("AI Studio Worker", () => {
     }), { ...env, TASKS });
     const cookie = loginResponse.headers.get("set-cookie").split(";")[0];
     const originalFetch = globalThis.fetch;
-    let geminiBody;
+    const geminiBodies = [];
+    let turn = 0;
     globalThis.fetch = async (url, options = {}) => {
       if (String(url).includes("generativelanguage.googleapis.com")) {
-        geminiBody = JSON.parse(options.body);
-        return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "Я могу помочь с анализом, но не могу изменять код." }] } }] }), {
+        geminiBodies.push(JSON.parse(options.body));
+        const parts = turn++ === 0
+          ? [{ functionCall: { name: "write_repository_file", args: { path: "README.md", branch: "ai-studio/attempt", content: "tampered", message: "attempt" } } }]
+          : [{ text: "Я могу помочь с анализом, но не могу изменять код." }];
+        return new Response(JSON.stringify({ candidates: [{ content: { parts } }] }), {
           status: 200, headers: { "content-type": "application/json" }
         });
       }
@@ -933,8 +937,11 @@ describe("AI Studio Worker", () => {
         } })
       }), { ...env, TASKS });
       assert.equal(response.status, 200);
-      assert.equal(geminiBody.tools, undefined);
-      assert.equal(geminiBody.contents.some(item => item.parts?.some(part => String(part.text || "").includes("СНИМОК РЕПОЗИТОРИЯ"))), false);
+      assert.equal(geminiBodies.length, 2);
+      assert.equal(geminiBodies[0].tools, undefined);
+      assert.equal(geminiBodies[0].contents.some(item => item.parts?.some(part => String(part.text || "").includes("СНИМОК РЕПОЗИТОРИЯ"))), false);
+      const toolResponse = geminiBodies[1].contents.at(-1).parts[0].functionResponse.response;
+      assert.match(toolResponse.error, /только владельцу/i);
     } finally {
       globalThis.fetch = originalFetch;
     }
