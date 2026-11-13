@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import worker, { assertWorkflowExecutionSucceeded, extractCohereResponseText, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, normalizeWorkflowTeamSettings, parseCohereChangesResponse } from "./core.js";
+import worker, { assertWorkflowExecutionSucceeded, extractCohereResponseText, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, normalizeAgentAssignments, normalizeWorkflowTeamSettings, parseCohereChangesResponse } from "./core.js";
 
 const env = {
   APP_PASSWORD: "correct-horse",
@@ -74,6 +74,50 @@ describe("Cohere North response normalization", () => {
   it("unwraps nested response JSON", () => {
     const p={choices:[{message:{content:JSON.stringify({result:{changes:[{path:"src/x.js",content:"x"}]}})}}]};
     assert.equal(parseCohereChangesResponse(p).changes[0].path,"src/x.js");
+  });
+});
+
+describe("Gemini developer delegation", () => {
+  it("requires a separate assignment for every enabled developer", () => {
+    const assignments = [
+      { agent: "qwen", task: "Implement the API", allowedPaths: ["worker/core.js"] }
+    ];
+    assert.throws(
+      () => normalizeAgentAssignments(assignments, ["qwen", "north"], "Build the feature"),
+      /каждому включённому разработчику/
+    );
+  });
+
+  it("preserves distinct scoped assignments for Qwen and North", () => {
+    const assignments = normalizeAgentAssignments([
+      { agent: "qwen", task: "Implement backend", allowedPaths: ["worker/core.js"] },
+      { agent: "north", task: "Implement UI", allowedPaths: ["src/App.jsx"] }
+    ], ["qwen", "north"], "Build the feature");
+    assert.deepEqual(assignments, [
+      { agent: "qwen", task: "Implement backend", allowedPaths: ["worker/core.js"] },
+      { agent: "north", task: "Implement UI", allowedPaths: ["src/App.jsx"] }
+    ]);
+  });
+
+  it("rejects overlapping file ownership between developers", () => {
+    assert.throws(() => normalizeAgentAssignments([
+      { agent: "qwen", task: "Backend", allowedPaths: ["worker/core.js"] },
+      { agent: "north", task: "Also backend", allowedPaths: ["worker/core.js"] }
+    ], ["qwen", "north"], "Build the feature"), /один файл нескольким разработчикам/);
+  });
+
+  it("rejects an assignment for a disabled developer", () => {
+    assert.throws(() => normalizeAgentAssignments([
+      { agent: "qwen", task: "Backend", allowedPaths: ["worker/core.js"] },
+      { agent: "north", task: "UI", allowedPaths: ["src/App.jsx"] }
+    ], ["qwen"], "Build the feature"), /отключён/);
+  });
+
+  it("keeps the single-developer fallback when Gemini supplies no assignments", () => {
+    assert.deepEqual(
+      normalizeAgentAssignments([], ["qwen"], "Build the feature"),
+      [{ agent: "qwen", task: "Build the feature", allowedPaths: [] }]
+    );
   });
 });
 
