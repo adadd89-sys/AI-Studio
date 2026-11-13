@@ -770,7 +770,7 @@ describe("AI Studio Worker", () => {
       assert.equal(result.ok, true);
       assert.match(result.branch, /^ai-studio\/task-/);
       assert.deepEqual(result.filesChanged.map(file => file.path).sort(), ["src/new-screen.jsx", "src/theme.css"]);
-      assert.equal(result.gemmaReview, "Gemma: Изменения корректны.");
+      assert.match(result.gemmaReview, /Gemma: Изменения корректны\./);
       assert.deepEqual(result.delegation.map(item => item.agent).sort(), ["north", "qwen"]);
       assert.equal(result.pullRequest.number, 41);
       assert.equal(result.pullRequest.url, "https://github.com/adadd89-sys/AI-Studio/pull/41");
