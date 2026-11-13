@@ -718,3 +718,73 @@ button,input,textarea,select { font-family: 'Inter', sans-serif; }
   .chat-content .chat-page .composer-hint { display: none; }
   .chat-content .chat-page .composer-footer { justify-content: flex-end; }
 }
+
+
+/* ChatGPT-style chat: scrollable history, compact input and round send control. */
+.chat-content .chat-page .chat-thread {
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(142,128,205,.42) transparent;
+  align-content: start;
+  min-height: 0;
+  padding: 12px 4px 18px;
+  scroll-behavior: smooth;
+}
+.chat-content .chat-page .chat-thread::-webkit-scrollbar { width: 5px; }
+.chat-content .chat-page .chat-thread::-webkit-scrollbar-thumb { background: rgba(142,128,205,.38); border-radius: 8px; }
+.chat-content .chat-page .chat-composer.chatgpt-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 9px;
+  flex: 0 0 auto;
+  padding: 8px 9px 8px 15px;
+  border: 1px solid rgba(145,151,190,.22);
+  border-radius: 24px;
+  background: rgba(22,26,40,.82);
+  box-shadow: 0 8px 28px rgba(0,0,0,.18);
+}
+.chat-content .chat-page .chatgpt-composer textarea {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  max-height: 120px;
+  padding: 6px 0;
+  border: 0;
+  outline: 0;
+  resize: none;
+  overflow-y: auto;
+  background: transparent;
+  color: #eef0fa;
+  font-size: 15px !important;
+  line-height: 1.45;
+}
+.chat-content .chat-page .chatgpt-composer textarea:focus { border: 0; box-shadow: none; }
+.chat-content .chat-page .chatgpt-composer textarea::placeholder { color: #9299ad; }
+.chat-send-button {
+  display: grid;
+  place-items: center;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: linear-gradient(145deg,#a99aff,#7663e8);
+  color: #fff;
+  box-shadow: 0 3px 13px rgba(120,98,225,.32);
+  cursor: pointer;
+  transition: transform .18s ease, opacity .18s ease, filter .18s ease;
+}
+.chat-send-button:disabled { opacity: .38; cursor: default; box-shadow: none; }
+.chat-send-button:not(:disabled):active { transform: scale(.92); }
+.chat-send-spinner { width: 15px; height: 15px; border: 2px solid rgba(255,255,255,.35); border-top-color: white; border-radius: 50%; animation: chat-send-spin .7s linear infinite; }
+@keyframes chat-send-spin { to { transform: rotate(360deg); } }
+@media (max-width:650px) {
+  .chat-content .chat-page .chat-thread { padding: 8px 2px 14px; }
+  .chat-content .chat-page .chat-composer.chatgpt-composer { padding: 6px 7px 6px 13px; border-radius: 23px; }
+  .chat-content .chat-page .chatgpt-composer textarea { min-height: 30px; max-height: 108px; font-size: 16px !important; }
+  .chat-send-button { flex-basis: 34px; width: 34px; height: 34px; }
+}
