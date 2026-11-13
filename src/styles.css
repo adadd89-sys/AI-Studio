@@ -821,3 +821,10 @@ button,input,textarea,select { font-family: 'Inter', sans-serif; }
 @keyframes startup-spin{to{transform:rotate(360deg)}}@keyframes startup-pulse{0%,100%{opacity:.7;filter:brightness(1);transform:scale(1)}50%{opacity:1;filter:brightness(1.5);transform:scale(1.05)}}@keyframes startup-float{0%,100%{transform:translate3d(0,0,0);opacity:.3}50%{transform:translate3d(12px,-18px,0);opacity:1}}
 @media(max-height:720px){.startup-core{width:145px;height:145px;margin:0 0 12px}.startup-logo{width:70px;height:70px}.startup-checks{gap:6px;margin:16px 0}.startup-check{padding:8px 10px}}
 @media(prefers-reduced-motion:reduce){.startup-screen *{animation-duration:.01ms!important;animation-iteration-count:1!important;transition:none!important}}
+
+
+/* Optional, user-activated cosmic ambience control. */
+.ambient-toggle{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:34px;padding:0 11px;border:1px solid rgba(151,157,195,.2);border-radius:11px;background:rgba(35,39,58,.48);color:#aeb5ca;font:600 11px Inter, sans-serif;cursor:pointer;transition:all .2s ease}
+.ambient-toggle:hover{border-color:rgba(157,143,255,.48);color:#e8e4ff;background:rgba(107,91,184,.13)}
+.ambient-toggle.is-on{border-color:rgba(126,111,231,.42);background:rgba(105,88,190,.16);color:#c7bcff;box-shadow:0 0 18px rgba(127,107,237,.1)}
+@media(max-width:650px){.ambient-toggle{min-height:32px;padding:0 9px;gap:5px}.ambient-toggle span{font-size:10px}.topbar-right{gap:7px}}
