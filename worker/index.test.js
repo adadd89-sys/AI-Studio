@@ -823,6 +823,50 @@ describe("AI Studio Worker", () => {
     }
   });
 
+  it("retries a temporary Gemini 503 in chat before returning an error", async () => {
+    const cookie = await getSessionCookie();
+    const originalFetch = globalThis.fetch;
+    let attempts = 0;
+    globalThis.fetch = async () => {
+      attempts++;
+      if (attempts === 1) return new Response(JSON.stringify({ error: { message: "Model overloaded" } }), { status: 503 });
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "Ответ после повтора." }] } }] }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    try {
+      const response = await worker.fetch(new Request("https://studio.test/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+        body: JSON.stringify({ message: "Привет", teamSettings: { agents: { gemini: true, qwen: false, gemma: false, north: false } } })
+      }), env);
+      assert.equal(response.status, 200);
+      assert.equal((await response.json()).reply, "Ответ после повтора.");
+      assert.equal(attempts, 2);
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
+  it("switches to Gemini fallback after repeated 503 responses in chat", async () => {
+    const cookie = await getSessionCookie();
+    const originalFetch = globalThis.fetch;
+    const requestedModels = [];
+    globalThis.fetch = async url => {
+      const target = String(url);
+      requestedModels.push(target.match(/models\/([^:]+):generateContent/)?.[1]);
+      if (requestedModels.length <= 3) return new Response(JSON.stringify({ error: { message: "Model overloaded" } }), { status: 503 });
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "Ответ резервной модели." }] } }] }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    try {
+      const response = await worker.fetch(new Request("https://studio.test/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+        body: JSON.stringify({ message: "Привет", teamSettings: { agents: { gemini: true, qwen: false, gemma: false, north: false } } })
+      }), env);
+      assert.equal(response.status, 200);
+      const result = await response.json();
+      assert.equal(result.reply, "Ответ резервной модели.");
+      assert.deepEqual(requestedModels, ["gemini-4-hydrogen", "gemini-4-hydrogen", "gemini-4-hydrogen", "gemini-3.8-flash"]);
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
   it("routes selected Gemini 3.6 Flash agent to its fixed free-tier model", async () => {
     const cookie = await getSessionCookie();
     const originalFetch = globalThis.fetch;
