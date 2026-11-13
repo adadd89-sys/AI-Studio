@@ -1380,20 +1380,22 @@ export default {
         }
 
         async function reviewTeam(changes) {
-          const reviews = [];
-          if (deepReview) reviews.push({ agent: "gemma", result: await reviewChanges(changes) });
-          if (teamSettings.agents.north && intensity >= 50) reviews.push({ agent: "north", result: await reviewWithNorth(changes) });
+          const reviewTasks = [];
+          if (deepReview) reviewTasks.push(reviewChanges(changes).then(result => ({ agent: "gemma", result })));
+          if (teamSettings.agents.north && intensity >= 50) reviewTasks.push(reviewWithNorth(changes).then(result => ({ agent: "north", result })));
           if (intensity >= 50) {
             for (const agentKey of ["gemini38", "gemini36", "geminiLite", "gemini31Lite"]) {
-              if (teamSettings.agents[agentKey]) reviews.push({ agent: agentKey, result: await reviewWithGeminiModel(agentKey, changes) });
+              if (teamSettings.agents[agentKey]) reviewTasks.push(reviewWithGeminiModel(agentKey, changes).then(result => ({ agent: agentKey, result })));
             }
           }
+          const reviews = await Promise.all(reviewTasks);
           const label = item => item.agent === "north" ? "North" : item.agent === "gemma" ? "Gemma" : GEMINI_AGENT_LABELS[item.agent] || item.agent;
           return {
             approved: reviews.every(item => item.result.approved),
             summary: reviews.map(item => label(item) + ": " + (item.result.summary || (item.result.approved ? "Одобрено" : "Есть замечания"))).join(" · ") || "Ревью пропущено согласно выбранной интенсивности.",
             issues: reviews.flatMap(item => item.result.issues || []),
-            northReview: reviews.find(item => item.agent === "north")?.result || null
+            northReview: reviews.find(item => item.agent === "north")?.result || null,
+            reviewers: reviews.map(item => item.agent)
           };
         }
 
