@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import worker, { assertWorkflowExecutionSucceeded, extractCohereResponseText, getSessionIdentity, hasAuthProvider, normalizeWorkflowTeamSettings, parseCohereChangesResponse } from "./core.js";
+import worker, { assertWorkflowExecutionSucceeded, extractCohereResponseText, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, normalizeWorkflowTeamSettings, parseCohereChangesResponse } from "./core.js";
 
 const env = {
   APP_PASSWORD: "correct-horse",
@@ -1193,4 +1193,14 @@ describe("AI Studio Worker", () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it("detects task snapshot changes before writing to KV", () => {
+    const queued = { jobId: "job-1", state: "queued", status: "В очереди" };
+    const unchanged = { jobId: "job-1", state: "queued", status: "В очереди" };
+    const running = { jobId: "job-1", state: "running", status: "Выполняется" };
+    assert.equal(hasTaskSnapshotChanged(queued, unchanged), false);
+    assert.equal(hasTaskSnapshotChanged(queued, running), true);
+    assert.equal(hasTaskSnapshotChanged(running, { ...running, result: { branch: "task-1" } }), true);
+  });
+
 });
