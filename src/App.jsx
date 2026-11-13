@@ -255,6 +255,8 @@ function App() {
   const [geminiHealth, setGeminiHealth] = useState(null);
   const [geminiCallStatus, setGeminiCallStatus] = useState(null);
   const [authState, setAuthState] = useState('checking');
+  const [splashDone, setSplashDone] = useState(false);
+  const [splashProgress, setSplashProgress] = useState(0);
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -405,6 +407,19 @@ function App() {
   }
 
   useEffect(() => {
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      const progress = Math.min(100, ((Date.now() - startedAt) / 9000) * 100);
+      setSplashProgress(progress);
+      if (progress >= 100) {
+        window.clearInterval(timer);
+        setSplashDone(true);
+      }
+    }, 80);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
     const telegram = window.Telegram?.WebApp;
     if (telegram) {
       telegram.ready();
@@ -522,12 +537,13 @@ function App() {
         const reply = String(data.reply || 'Ответ не получен.');
         setChatGithubResult(data.github || null);
         const agentLabel = data.agentLabel || data.agent;
-        setChatMessages(current => [...current, { role: 'assistant', content: '', agent: agentLabel }].slice(-24));
+        const assistantMessageId = 'assistant-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+        setChatMessages(current => [...current, { id: assistantMessageId, role: 'assistant', content: '', agent: agentLabel }].slice(-24));
         setTask('');
         setChatStatus('Ответ получен · постепенно вывожу текст…');
         for (let index = 0; index < reply.length; index += 6) {
           const chunk = reply.slice(index, index + 6);
-          setChatMessages(current => current.map((item, itemIndex) => itemIndex === current.length - 1
+          setChatMessages(current => current.map(item => item.id === assistantMessageId
             ? { ...item, content: item.content + chunk }
             : item));
           await new Promise(resolve => setTimeout(resolve, 24));
@@ -662,6 +678,24 @@ function App() {
   const visibleUsage = usageEvents.filter(item => new Date(item.at) >= usageCutoff);
   const trackedRequests = visibleUsage.reduce((sum, item) => sum + (Number.isFinite(item.requests) ? item.requests : (item.agents?.length || 0)), 0);
   const trackedNeurons = visibleUsage.reduce((sum, item) => sum + (Number.isFinite(item.neurons) ? item.neurons : 0), 0);
+  if (!splashDone || authState === 'checking') {
+    const checks = [
+      { label: 'Подготовка к работе', detail: 'Инициализация рабочего пространства', done: splashProgress >= 18 },
+      { label: 'Проверка ИИ-агентов', detail: geminiHealth ? 'Конфигурация провайдеров получена' : 'Проверяем доступность конфигурации', done: Boolean(geminiHealth) },
+      { label: 'Готовность к анализу данных', detail: 'Подготовка аналитических модулей', done: splashProgress >= 66 },
+      { label: 'Проверка авторизации Telegram', detail: authState === 'authenticated' ? 'Личность подтверждена' : authState === 'checking' ? 'Проверяем подпись Telegram' : 'Проверка завершена · доступ ограничен владельцем', done: authState !== 'checking', failed: authState !== 'checking' && authState !== 'authenticated' }
+    ];
+    return <div className="startup-screen">
+      <div className="startup-grid" aria-hidden="true" />
+      <div className="startup-particles" aria-hidden="true"><i/><i/><i/><i/><i/><i/><i/><i/></div>
+      <div className="startup-core" aria-hidden="true"><div className="startup-orbit startup-orbit-a"/><div className="startup-orbit startup-orbit-b"/><div className="startup-orbit startup-orbit-c"/><div className="startup-logo"><BrainCircuit size={48} strokeWidth={1.35}/></div><span className="startup-node node-a"/><span className="startup-node node-b"/><span className="startup-node node-c"/><span className="startup-node node-d"/></div>
+      <div className="startup-brand"><span>AI STUDIO</span><i>INTELLIGENCE WORKSPACE</i></div>
+      <div className="startup-copy"><div className="startup-eyebrow"><span/> SYSTEM INITIALIZATION</div><h1>Подготовка к работе</h1><p>Запускаем интеллектуальную среду и проверяем защищённое соединение</p></div>
+      <div className="startup-checks">{checks.map((check,index)=><div className={'startup-check ' + (check.done ? (check.failed ? 'is-failed' : 'is-done') : 'is-pending')} key={check.label}><span className="startup-check-icon">{check.done ? (check.failed ? '!' : '✓') : <i/>}</span><span className="startup-check-copy"><strong>{check.label}</strong><small>{check.detail}</small></span><span className="startup-check-state">{check.done ? (check.failed ? 'ОГРАНИЧЕНО' : 'ГОТОВО') : 'В ПРОЦЕССЕ'}</span></div>)}</div>
+      <div className="startup-progress"><div><span>ИНИЦИАЛИЗАЦИЯ СИСТЕМЫ</span><strong>{Math.round(splashProgress)}%</strong></div><div className="startup-progress-track"><i style={{width: splashProgress + '%'}}/></div></div>
+      <div className="startup-footer"><span>SECURE SESSION</span><span>AI CORE <i/></span></div>
+    </div>;
+  }
   if (authState !== 'authenticated') {
     return <div className="login-screen"><form className="login-card" onSubmit={login}><div className="brand-mark"><BrainCircuit size={22} /></div><div className="eyebrow">ЗАЩИЩЁННЫЙ ДОСТУП</div><h1>AI Studio</h1><p>{authState === 'checking' ? 'Проверяем авторизацию…' : authState === 'setup' ? 'Авторизация ещё не настроена. Добавьте APP_PASSWORD и SESSION_SECRET в секреты Cloudflare Worker.' : authState === 'error' ? 'Не удалось подтвердить Telegram-вход. Откройте Mini App через Telegram или настройте парольный вход.' : 'Введите личный пароль, чтобы открыть рабочее пространство.'}</p>{authState === 'login' && <><input type="password" autoComplete="current-password" value={loginPassword} onChange={event => setLoginPassword(event.target.value)} placeholder="Пароль доступа" /><button className="primary-button" type="submit" disabled={!loginPassword || isLoggingIn}>{isLoggingIn ? 'Входим…' : 'Войти'} <Send size={15} /></button></>}{loginError && <div className="task-error">{loginError}</div>}</form></div>;
   }
