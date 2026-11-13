@@ -548,7 +548,7 @@ describe("AI Studio Worker", () => {
     assert.equal(result.reply, "Привет! Конечно, давай.");
     assert.equal(result.usage.requests, 1);
     assert.equal(requestedModel, "@cf/qwen/qwen3.8-27b");
-    assert.equal(requestedBudget, 614);
+    assert.equal(requestedBudget, 2253);
   });
 
   it("does not contact a disabled agent in lightweight chat", async () => {

@@ -538,7 +538,7 @@ export default {
           const contents = messages.map(item => ({ role: item.role === "assistant" ? "model" : "user", parts: [{ text: item.content }] }));
           const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent?key=" + encodeURIComponent(env.GEMINI_API_KEY), {
             method: "POST", headers: { "content-type": "application/json" },
-            body: JSON.stringify({ contents, generationConfig: { temperature: 0.7, maxOutputTokens: scaledTokenBudget(intensity, 512, 1536) } })
+            body: JSON.stringify({ contents, generationConfig: { temperature: 0.7, maxOutputTokens: scaledTokenBudget(intensity, 2048, 4096) } })
           });
           if (!response.ok) throw new Error("Gemini API вернул HTTP " + response.status);
           const payload = await response.json();
@@ -546,13 +546,13 @@ export default {
         } else if (agent === "qwen" || agent === "gemma") {
           if (!env.AI) return json({ error: "Cloudflare Workers AI не настроен." }, 503);
           const model = agent === "qwen" ? (env.QWEN_MODEL || "@cf/qwen/qwen3.8-27b") : (env.GEMMA_MODEL || "@cf/google/gemma-4-26b-a4b-it");
-          const result = await env.AI.run(model, { messages: [{ role: "system", content: "Ты — собеседник AI Studio. Отвечай естественно, по-русски, кратко и по существу. Не выполняй разработку, не вызывай инструменты и не утверждай, что совершил действия." }, ...messages], max_completion_tokens: scaledTokenBudget(intensity, 512, 1536), temperature: 0.7 });
+          const result = await env.AI.run(model, { messages: [{ role: "system", content: "Ты — собеседник AI Studio. Отвечай естественно, по-русски, кратко и по существу. Не выполняй разработку, не вызывай инструменты и не утверждай, что совершил действия." }, ...messages], max_completion_tokens: scaledTokenBudget(intensity, 2048, 4096), temperature: 0.7 });
           reply = result?.response || result?.choices?.[0]?.message?.content || result?.choices?.[0]?.message?.reasoning_content || "";
         } else {
           if (!env.OPENROUTER_API_KEY) return json({ error: "Cohere North Mini Code включён, но OPENROUTER_API_KEY не настроен." }, 503);
           const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
             method: "POST", headers: { "content-type": "application/json", "authorization": "Bearer " + env.OPENROUTER_API_KEY, "http-referer": "https://ai-studio.sergey-adadd89.workers.dev", "x-title": "AI Studio" },
-            body: JSON.stringify({ model: "cohere/north-mini-code:free", max_tokens: scaledTokenBudget(intensity, 512, 1536), messages: [{ role: "system", content: "Ты — собеседник AI Studio. Отвечай естественно, по-русски, кратко и по существу. Не утверждай, что совершил действия." }, ...messages] })
+            body: JSON.stringify({ model: "cohere/north-mini-code:free", max_tokens: scaledTokenBudget(intensity, 2048, 4096), messages: [{ role: "system", content: "Ты — собеседник AI Studio. Отвечай естественно, по-русски, кратко и по существу. Не утверждай, что совершил действия." }, ...messages] })
           });
           if (!response.ok) throw new Error("OpenRouter вернул HTTP " + response.status);
           const payload = await response.json();

@@ -285,9 +285,13 @@ function App() {
     localStorage.setItem('ai-studio-chat', JSON.stringify(chatMessages.slice(-24)));
   }, [chatMessages]);
 
+  const chatShouldAutoScrollRef = useRef(true);
+
   useEffect(() => {
     const thread = chatThreadRef.current;
-    if (thread) thread.scrollTop = thread.scrollHeight;
+    if (thread && chatShouldAutoScrollRef.current) {
+      thread.scrollTop = thread.scrollHeight;
+    }
   }, [chatMessages, chatStatus, chatLoading]);
 
   useEffect(() => {
@@ -704,7 +708,7 @@ function App() {
         <div className={active === 'Чат с ИИ' ? "page-content chat-content" : "page-content"}>
           {active === 'Чат с ИИ' ? <section className="task-panel chat-mode chat-page">
             <div className="chat-page-heading"><div><div className="eyebrow"><MessageCircle size={14}/> ЛИЧНЫЙ ДИАЛОГ</div><h1>Чат с ИИ</h1><p>Отдельное пространство для общения с выбранным агентом</p></div><div className="chat-agent-indicator"><span className="working-pulse"/>{teamSettings.agents.gemini ? 'Gemini · основной агент' : teamSettings.agents.qwen ? 'Qwen · основной агент' : 'Активный агент'}</div></div>
-            <div className="chat-thread" ref={chatThreadRef} aria-live="polite">
+            <div className="chat-thread" ref={chatThreadRef} onScroll={event => { const node = event.currentTarget; chatShouldAutoScrollRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 96; }} aria-live="polite">
               {chatMessages.length === 0 && <div className="chat-empty"><div className="chat-empty-orb"><BrainCircuit size={25}/></div><strong>С чего начнём?</strong><span>Напишите сообщение — ИИ ответит прямо здесь.</span></div>}
               {chatMessages.map((item,index) => <div key={index} className={'chat-message ' + item.role}><span>{item.role === 'user' ? 'Вы' : item.agent || 'AI Studio'}</span><p>{item.content || (item.role === 'assistant' ? <span className="typing-dots"><i/><i/><i/></span> : '')}</p></div>)}
               {(chatLoading || chatStatus) && <div className={'chat-working ' + (chatLoading ? '' : chatStatus.startsWith('Не удалось') ? 'error' : 'complete')} role="status"><span className={chatLoading ? 'working-pulse' : chatStatus.startsWith('Не удалось') ? 'working-error' : 'working-check'}>{chatLoading ? '' : chatStatus.startsWith('Не удалось') ? '!' : '✓'}</span><span>{chatStatus || 'Модель готовит ответ…'}</span></div>}
