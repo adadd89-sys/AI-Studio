@@ -864,6 +864,9 @@ function App() {
               {lastPlan.questions?.length > 0 && <div className="plan-notes"><strong>Нужно уточнить</strong>{lastPlan.questions.map((question, index) => <span key={index}>{question}</span>)}</div>}
               {executionResult?.branch && <div className="plan-notes">
                 <strong>Результат работы команды</strong>
+                {executionResult.pullRequest?.url && <a href={executionResult.pullRequest.url} target="_blank" rel="noreferrer">Открыть Pull Request #{executionResult.pullRequest.number} →</a>}
+                {executionResult.pullRequestError && <span className="review-error">Ветка создана, но PR не открылся: {executionResult.pullRequestError}</span>}
+                {(executionResult.delegation || []).map((item, index) => <span key={item.agent + index}><strong>{item.agent === "qwen" ? "Qwen" : "Cohere North"} — отдельное задание:</strong> {item.task} · файлы: {(item.files || []).join(", ") || "изменений нет"}</span>)
                 <span>Изменено файлов: {(executionResult.filesChanged || []).length}</span>
                 {(executionResult.filesChanged || []).map(file => <span key={file.path}>{file.path}</span>)}
                 <a href={'https://github.com/adadd89-sys/AI-Studio/tree/' + executionResult.branch} target="_blank" rel="noreferrer">Открыть ветку с изменениями в GitHub →</a>
@@ -871,7 +874,7 @@ function App() {
               </div>}
               <div className="review-kit">
                 <div className="review-kit-heading"><strong>Результаты работы команды</strong><span>{(executionResult?.agentsUsed || []).map(key => ({gemini:'Gemini',qwen:'Qwen',gemma:'Gemma',north:'North'}[key] || key)).join(' · ') || 'Нет данных об агентах'}</span></div>
-                <p>{reviewStatus || "Оба агента автоматически получают план Gemini и независимо проверяют его."}</p>
+                <p>{reviewStatus || "Gemini распределяет отдельные задания между разработчиками; Gemma и дополнительные модели выполняют ревью."}</p>
                 <div className="agent-reviews">
                   <div className="agent-review"><strong>Gemma 4 · Cloudflare Workers AI</strong>{gemmaReview ? (gemmaReview.ok ? <p>{gemmaReview.review}</p> : <p className="review-error">{gemmaReview.error}</p>) : executionResult && !executionResult.agentsUsed?.includes('gemma') ? <span>Не запускалась: проверка не требовалась при выбранной интенсивности или не было изменений.</span> : <span>Ожидает проверки…</span>}</div>
                   <div className="agent-review"><strong>{teamSettings.agents.qwen ? "Qwen 3.8 · Cloudflare Workers AI" : "Cohere North Mini Code · OpenRouter"}</strong>{qwenReview ? (qwenReview.ok ? <p>{qwenReview.review}</p> : <p className="review-error">{qwenReview.error}</p>) : <span>Ожидает проверки…</span>}</div>
