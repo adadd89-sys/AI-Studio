@@ -1087,8 +1087,9 @@ function App() {
                 <a href={'https://github.com/adadd89-sys/AI-Studio/compare/main...' + executionResult.branch} target="_blank" rel="noreferrer">Посмотреть сравнение с main →</a>
               </div>}
               <div className="review-kit">
-                <div className="review-kit-heading"><strong>Результаты работы команды</strong><span>{(executionResult?.agentsUsed || []).map(key => ({gemini:'Gemini',qwen:'Qwen',gemma:'Gemma',north:'North'}[key] || key)).join(' · ') || 'Нет данных об агентах'}</span></div>
-                <p>{reviewStatus || "Gemini распределяет отдельные задания между разработчиками; Gemma и дополнительные модели выполняют ревью."}</p>
+                <div className="review-kit-heading"><strong>Результаты работы команды</strong><span>{(executionResult?.agentsUsed || []).map(key => ({gemini:'Gemini',gemini38:'Gemini 3.8',gemini36:'Gemini 3.6',geminiLite:'Gemini Lite',gemini31Lite:'Gemini 3.1 Lite',qwen:'Qwen',gemma:'Gemma',north:'North'}[key] || key)).join(' · ') || 'Нет данных об агентах'}</span></div>
+                <p>{reviewStatus || "Gemini распределяет отдельные задания между разработчиками; независимые модели проверяют изменения."}</p>
+                {executionResult && <p className="settings-note">Независимое ревью: {(executionResult.reviewers || []).map(key => ({gemini38:'Gemini 3.8',gemini36:'Gemini 3.6',geminiLite:'Gemini Lite',gemini31Lite:'Gemini 3.1 Lite',gemma:'Gemma',north:'North'}[key] || key)).join(' · ') || 'не запускалось на выбранной интенсивности'}.</p>}
                 <div className="agent-reviews">
                   <div className="agent-review"><strong>Gemma 4 · Cloudflare Workers AI</strong>{gemmaReview ? (gemmaReview.ok ? <p>{gemmaReview.review}</p> : <p className="review-error">{gemmaReview.error}</p>) : executionResult && !executionResult.agentsUsed?.includes('gemma') ? <span>Не запускалась: проверка не требовалась при выбранной интенсивности или не было изменений.</span> : <span>Ожидает проверки…</span>}</div>
                   <div className="agent-review"><strong>{teamSettings.agents.qwen ? "Qwen 3.8 · Cloudflare Workers AI" : "Cohere North Mini Code · OpenRouter"}</strong>{qwenReview ? (qwenReview.ok ? <p>{qwenReview.review}</p> : <p className="review-error">{qwenReview.error}</p>) : <span>Ожидает проверки…</span>}</div>
