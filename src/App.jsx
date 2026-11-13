@@ -375,7 +375,8 @@ function App() {
       if (!completed) {
         throw new Error('Задача всё ещё выполняется в фоне. Идентификатор: ' + started.jobId + '. Обновите страницу позже и проверьте статус.');
       }
-      setGeminiCallStatus(true);
+      const actualAgents = Array.isArray(data.agentsUsed) ? data.agentsUsed : [];
+      setGeminiCallStatus(actualAgents.includes('gemini') ? true : null);
       const plan = data.plan || { summary: data.summary || 'Задача проанализирована', steps: [], risks: [], questions: [] };
       setLastPlan({
         title: value,
@@ -387,12 +388,12 @@ function App() {
       setExecutionResult(data);
       setUsageEvents(current => [{
         id: Date.now(), at: new Date().toISOString(), mode: teamSettings.mode,
-        intensity: teamSettings.intensity, agents: data.agentsUsed || Object.keys(teamSettings.agents).filter(key => teamSettings.agents[key]),
+        intensity: teamSettings.intensity, agents: actualAgents,
         requests: data.usage?.requests ?? null, neurons: data.usage?.neurons ?? null,
         task: value.slice(0, 160)
       }, ...current].slice(0, 300));
-      setQwenReview({ ok: true, review: data.qwenReview || 'Изменения подготовлены.' });
-      setGemmaReview({ ok: true, review: data.gemmaReview || 'Проверка завершена.' });
+      setQwenReview(actualAgents.includes('qwen') || actualAgents.includes('north') ? { ok: true, review: data.qwenReview || 'Изменения подготовлены.' } : null);
+      setGemmaReview(actualAgents.includes('gemma') ? { ok: true, review: data.gemmaReview || 'Проверка завершена.' } : null);
       const count = (data.filesChanged || []).length;
       setReviewStatus(data.branch
         ? 'Проверка пройдена. Qwen подготовил ' + count + ' файл(ов) в отдельной GitHub-ветке.'
@@ -510,7 +511,7 @@ function App() {
                 <div className="review-kit-heading"><strong>Автоматическая проверка команды</strong><span>Gemma 4 + Qwen 3.8</span></div>
                 <p>{reviewStatus || "Оба агента автоматически получают план Gemini и независимо проверяют его."}</p>
                 <div className="agent-reviews">
-                  <div className="agent-review"><strong>Gemma 4 · Cloudflare Workers AI</strong>{gemmaReview ? (gemmaReview.ok ? <p>{gemmaReview.review}</p> : <p className="review-error">{gemmaReview.error}</p>) : <span>Ожидает проверки…</span>}</div>
+                  <div className="agent-review"><strong>Gemma 4 · Cloudflare Workers AI</strong>{gemmaReview ? (gemmaReview.ok ? <p>{gemmaReview.review}</p> : <p className="review-error">{gemmaReview.error}</p>) : executionResult && !executionResult.agentsUsed?.includes('gemma') ? <span>Не запускалась: проверка не требовалась при выбранной интенсивности или не было изменений.</span> : <span>Ожидает проверки…</span>}</div>
                   <div className="agent-review"><strong>{teamSettings.agents.qwen ? "Qwen 3.8 · Cloudflare Workers AI" : "Cohere North Mini Code · OpenRouter"}</strong>{qwenReview ? (qwenReview.ok ? <p>{qwenReview.review}</p> : <p className="review-error">{qwenReview.error}</p>) : <span>Ожидает проверки…</span>}</div>
                   {executionResult?.northReview && <div className="agent-review"><strong>North Mini Code · независимое ревью</strong><p>{executionResult.northReview.summary || (executionResult.northReview.approved ? "Одобрено" : "Есть замечания")}</p></div>}
                 </div>
@@ -523,9 +524,11 @@ function App() {
             <div className="agent-grid">
               {agents.map(agent => {
                 const configured = agent.key === 'gemini' ? Boolean(geminiHealth?.modelConfigured) : agent.key === 'north' ? Boolean(geminiHealth?.openrouterConfigured) : Boolean(geminiHealth?.qwenConfigured);
-                const result = agent.key === 'gemini' ? geminiCallStatus : agent.key === 'gemma' ? gemmaReview?.ok : agent.key === 'qwen' ? qwenReview?.ok : null;
+                const usedAgents = executionResult?.agentsUsed || [];
+                const agentWasUsed = agent.key === 'qwen' ? usedAgents.includes('qwen') : usedAgents.includes(agent.key);
+                const result = agent.key === 'gemini' ? geminiCallStatus : agent.key === 'gemma' ? gemmaReview?.ok : agent.key === 'qwen' ? qwenReview?.ok : usedAgents.includes('north');
                 const failed = agent.key === 'gemini' ? geminiCallStatus === false : (agent.key === 'gemma' ? gemmaReview?.ok === false : agent.key === 'qwen' ? qwenReview?.ok === false : false);
-                const status = !teamSettings.agents[agent.key] ? 'Отключён' : result === true ? 'Ответ получен' : failed ? 'Ошибка вызова' : configured ? 'Подключение настроено · ждёт теста' : geminiHealth === null ? 'Проверяем подключение…' : agent.key === 'north' ? 'Требуется OPENROUTER_API_KEY' : 'Не настроено';
+                const status = !teamSettings.agents[agent.key] ? 'Отключён' : executionResult && !agentWasUsed ? 'Не участвовал в этой задаче' : result === true ? 'Вызов подтверждён' : failed ? 'Ошибка вызова' : configured ? 'Подключение настроено · ждёт запуска' : geminiHealth === null ? 'Проверяем подключение…' : agent.key === 'north' ? 'Требуется OPENROUTER_API_KEY' : 'Не настроено';
                 return <article className="agent-card" key={agent.key}>
                   <div className="agent-card-top"><div className={'agent-avatar ' + agent.tone}>{agent.initials}</div><span className={'agent-status ' + (result === true ? 'is-working' : failed ? 'is-error' : 'is-configured')}><span /> {status}</span></div>
                   <h3>{agent.name}</h3><div className="agent-role">{agent.role}</div><div className="agent-model">{agent.model}</div><p>{agent.detail}</p>
