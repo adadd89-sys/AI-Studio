@@ -271,6 +271,7 @@ function App() {
   const [chatMessages, setChatMessages] = useState(() => { try { return JSON.parse(localStorage.getItem('ai-studio-chat') || '[]').slice(-24); } catch { return []; } });
   const [chatLoading, setChatLoading] = useState(false);
   const [chatStatus, setChatStatus] = useState('');
+  const [chatGithubResult, setChatGithubResult] = useState(null);
   const chatThreadRef = useRef(null);
 
   useEffect(() => {
@@ -508,6 +509,7 @@ function App() {
     setReviewFailure(null);
     if (teamSettings.mode === 'chat') {
       setChatLoading(true);
+      setChatGithubResult(null);
       const chatLead = teamSettings.agents.gemini ? 'Gemini 4 Hydrogen' : teamSettings.agents.gemini38 ? 'Gemini 3.8 Flash' : teamSettings.agents.gemini36 ? 'Gemini 3.6 Flash' : teamSettings.agents.geminiLite ? 'Gemini 3.5 Flash-Lite' : teamSettings.agents.gemini31Lite ? 'Gemini 3.1 Flash-Lite' : teamSettings.agents.qwen ? 'Qwen' : teamSettings.agents.north ? 'Cohere North' : 'Gemma';
       setChatStatus(chatLead + ' получает запрос и готовит ответ…');
       setChatMessages(current => [...current, { role: 'user', content: value }].slice(-24));
@@ -518,6 +520,7 @@ function App() {
         setLastPlan(null);
         setExecutionResult(null);
         const reply = String(data.reply || 'Ответ не получен.');
+        setChatGithubResult(data.github || null);
         const agentLabel = data.agentLabel || data.agent;
         setChatMessages(current => [...current, { role: 'assistant', content: '', agent: agentLabel }].slice(-24));
         setTask('');
@@ -531,7 +534,7 @@ function App() {
         }
         setChatStatus('Ответ готов · ' + (agentLabel || 'ИИ'));
         setUsageEvents(current => [{ id: Date.now(), at: new Date().toISOString(), mode: 'chat', intensity: teamSettings.intensity, agents: data.agentsUsed || [data.agent], requests: data.usage?.requests ?? 1, neurons: null, task: value.slice(0,160) }, ...current].slice(0,300));
-        setReviewStatus('Ответ получен от ' + agentLabel + '. В режиме общения разработка и GitHub не запускаются.');
+        setReviewStatus(data.github ? 'Gemini подготовил изменения в GitHub и открыл Pull Request #' + data.github.number + '.' : 'Ответ получен от ' + agentLabel + '.');
       } catch (error) {
         setChatStatus('Не удалось получить ответ');
         setTaskError(error.message || 'Не удалось получить ответ.');
@@ -703,12 +706,13 @@ function App() {
 
         <div className={active === 'Чат с ИИ' ? "page-content chat-content" : "page-content"}>
           {active === 'Чат с ИИ' ? <section className="task-panel chat-mode chat-page">
-            <div className="chat-page-heading"><div><div className="eyebrow"><MessageCircle size={14}/> ЛИЧНЫЙ ДИАЛОГ</div><h1>Чат с ИИ</h1><p>Отдельное пространство для общения с выбранным агентом</p></div><div className="chat-agent-indicator"><span className="working-pulse"/>{teamSettings.agents.gemini ? 'Gemini · основной агент' : teamSettings.agents.qwen ? 'Qwen · основной агент' : 'Активный агент'}</div></div>
+            <div className="chat-page-heading"><div><div className="eyebrow"><MessageCircle size={14}/> ЛИЧНЫЙ ДИАЛОГ</div><h1>Чат с ИИ</h1><p>Общение, анализ проекта и работа с GitHub через Gemini</p></div><div className="chat-agent-indicator"><span className="working-pulse"/>{teamSettings.agents.gemini ? 'Gemini · основной агент' : teamSettings.agents.qwen ? 'Qwen · основной агент' : 'Активный агент'}</div></div>
             <div className="chat-thread" ref={chatThreadRef} aria-live="polite">
               {chatMessages.length === 0 && <div className="chat-empty"><div className="chat-empty-orb"><BrainCircuit size={25}/></div><strong>С чего начнём?</strong><span>Напишите сообщение — ИИ ответит прямо здесь.</span></div>}
               {chatMessages.map((item,index) => <div key={index} className={'chat-message ' + item.role}><span>{item.role === 'user' ? 'Вы' : item.agent || 'AI Studio'}</span><p>{item.content || (item.role === 'assistant' ? <span className="typing-dots"><i/><i/><i/></span> : '')}</p></div>)}
               {(chatLoading || chatStatus) && <div className={'chat-working ' + (chatLoading ? '' : chatStatus.startsWith('Не удалось') ? 'error' : 'complete')} role="status"><span className={chatLoading ? 'working-pulse' : chatStatus.startsWith('Не удалось') ? 'working-error' : 'working-check'}>{chatLoading ? '' : chatStatus.startsWith('Не удалось') ? '!' : '✓'}</span><span>{chatStatus || 'Модель готовит ответ…'}</span></div>}
             </div>
+            {chatGithubResult && <div className="workspace-notice chat-github-result"><strong>Изменения подготовлены в GitHub · PR #{chatGithubResult.number}</strong><a href={chatGithubResult.url} target="_blank" rel="noreferrer">Открыть Pull Request ↗</a><small>Изменения находятся в отдельной ветке и не попали в main.</small></div>}
             <form onSubmit={submitTask} className="chat-composer chatgpt-composer">
               <textarea value={task} onChange={e => setTask(e.target.value)} placeholder="Напишите сообщение…" rows={1}/>
               <button className="chat-send-button" type="submit" aria-label="Отправить сообщение" disabled={!task.trim() || chatLoading}>{chatLoading ? <span className="chat-send-spinner"/> : <Send size={17}/>}</button>
@@ -781,7 +785,7 @@ function App() {
               <input className="intensity-slider" type="range" min="0" max="100" step="5" value={teamSettings.intensity} onChange={event => updateTeamSetting('intensity', Number(event.target.value))} disabled={teamSettings.mode === 'max'}/>
               <div className="slider-labels"><span>Экономно</span><span>Сбалансированно</span><span>Максимум</span></div>
               <p className="settings-note">Интенсивность меняет размер ответов и глубину проверки, а не отключает базовые вызовы. Даже на 0% выбранный руководитель (Gemini, если включён) и один разработчик выполняют свои обязательные этапы.</p>
-              <div className="mode-options"><button className={teamSettings.mode === 'chat' ? 'mode-option selected' : 'mode-option'} onClick={() => updateTeamSetting('mode','chat')}><MessageCircle size={16}/><strong>Общение</strong><span>Короткие ответы без GitHub и разработки</span></button><button className={teamSettings.mode === 'normal' ? 'mode-option selected' : 'mode-option'} onClick={() => updateTeamSetting('mode','normal')}><Gauge size={16}/><strong>Обычная работа</strong><span>План, выполнение и нужные проверки</span></button><button className={teamSettings.mode === 'max' ? 'mode-option selected' : 'mode-option'} onClick={() => { updateTeamSetting('mode','max'); updateTeamSetting('intensity',100); }}><Zap size={16}/><strong>Максимальная нагрузка</strong><span>100% интенсивность и глубокая проверка. Участвуют только включённые агенты</span></button></div>
+              <div className="mode-options"><button className={teamSettings.mode === 'chat' ? 'mode-option selected' : 'mode-option'} onClick={() => updateTeamSetting('mode','chat')}><MessageCircle size={16}/><strong>Общение</strong><span>Диалог и GitHub-инструменты Gemini</span></button><button className={teamSettings.mode === 'normal' ? 'mode-option selected' : 'mode-option'} onClick={() => updateTeamSetting('mode','normal')}><Gauge size={16}/><strong>Обычная работа</strong><span>План, выполнение и нужные проверки</span></button><button className={teamSettings.mode === 'max' ? 'mode-option selected' : 'mode-option'} onClick={() => { updateTeamSetting('mode','max'); updateTeamSetting('intensity',100); }}><Zap size={16}/><strong>Максимальная нагрузка</strong><span>100% интенсивность и глубокая проверка. Участвуют только включённые агенты</span></button></div>
             </div>
             <div className="settings-card"><div className="settings-title"><div><strong>Участие агентов</strong><span>Отключённый агент не должен получать запросы</span></div></div>
               <div className="agent-toggle-list">{agents.map(agent => { const enabled = Boolean(teamSettings.agents[agent.key]); return <div className="agent-toggle" key={agent.key}><img className="agent-logo" src={agent.logo} alt={agent.name + ' logo'} loading="lazy"/><span className="agent-toggle-copy"><strong>{agent.name}</strong><small>{agent.model}</small></span><button type="button" className={'agent-switch ' + (enabled ? 'is-on' : '')} role="switch" aria-checked={enabled} aria-label={(enabled ? 'Выключить ' : 'Включить ') + agent.name} onClick={() => toggleAgent(agent.key, !enabled)}><span className="agent-switch-knob"/><span className="agent-switch-state">{enabled ? 'Вкл' : 'Выкл'}</span></button></div>; })}</div>

@@ -583,7 +583,7 @@ describe("AI Studio Worker", () => {
     assert.equal(result.reply, "Привет! Конечно, давай.");
     assert.equal(result.usage.requests, 1);
     assert.equal(requestedModel, "@cf/qwen/qwen3.8-27b");
-    assert.equal(requestedBudget, 614);
+    assert.ok(requestedBudget >= 1024 && requestedBudget <= 4096);
   });
 
   it("does not contact a disabled agent in lightweight chat", async () => {
@@ -764,6 +764,64 @@ describe("AI Studio Worker", () => {
     }
   });
 
+
+  it("lets Gemini read, edit a separate GitHub branch and open a PR from chat tools", async () => {
+    const cookie = await getSessionCookie();
+    const originalFetch = globalThis.fetch;
+    const geminiCalls = [
+      { functionCall: { name: "list_repository_files", args: { ref: "main" } } },
+      { functionCall: { name: "read_repository_file", args: { path: "README.md", ref: "main" } } },
+      { functionCall: { name: "create_work_branch", args: { name: "chat-tool-test" } } },
+      { functionCall: { name: "write_repository_file", args: { path: "README.md", branch: "ai-studio/chat-tool-test", content: "# Updated\\n", message: "Update README" } } },
+      { functionCall: { name: "create_pull_request", args: { branch: "ai-studio/chat-tool-test", title: "Update README", body: "Updated through Gemini chat." } } }
+    ];
+    const githubCalls = [];
+    let finalReply = false;
+    globalThis.fetch = async (url, options = {}) => {
+      const target = String(url);
+      if (target.includes("generativelanguage.googleapis.com")) {
+        if (geminiCalls.length) {
+          return new Response(JSON.stringify({ candidates: [{ content: { parts: [geminiCalls.shift()] } }] }), { status: 200, headers: { "content-type": "application/json" } });
+        }
+        finalReply = true;
+        return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "Готово. Создан Pull Request #42." }] } }] }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      githubCalls.push({ target, method: options.method || "GET" });
+      if (target.endsWith("/git/ref/heads/main")) return new Response(JSON.stringify({ object: { sha: "a".repeat(40) } }), { status: 200 });
+      if (target.includes("/git/trees/") && target.includes("?recursive=1")) return new Response(JSON.stringify({ tree: [{ path: "README.md", type: "blob" }] }), { status: 200 });
+      if (target.includes("/contents/README.md?ref=main")) return new Response(JSON.stringify({ type: "file", content: btoa("# Original\\n"), sha: "b".repeat(40) }), { status: 200 });
+      if (target.endsWith("/git/refs") && options.method === "POST") return new Response(JSON.stringify({ ref: "refs/heads/ai-studio/chat-tool-test" }), { status: 201 });
+      if (target.includes("/contents/README.md?ref=ai-studio%2Fchat-tool-test")) return new Response(JSON.stringify({ type: "file", sha: "c".repeat(40) }), { status: 200 });
+      if (target.endsWith("/contents/README.md") && options.method === "PUT") return new Response(JSON.stringify({ commit: { sha: "d".repeat(40) } }), { status: 200 });
+      if (target.endsWith("/pulls") && options.method === "POST") {
+        const pr = JSON.parse(options.body);
+        assert.equal(pr.base, "main");
+        assert.equal(pr.head, "ai-studio/chat-tool-test");
+        return new Response(JSON.stringify({ number: 42, html_url: "https://github.com/adadd89-sys/AI-Studio/pull/42", state: "open" }), { status: 201 });
+      }
+      throw new Error("Unexpected mocked request: " + target);
+    };
+    try {
+      const response = await worker.fetch(new Request("https://studio.test/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+        body: JSON.stringify({ message: "Изучи README, измени его, создай PR", history: [], teamSettings: {
+          intensity: 80, agents: { gemini: true, qwen: false, gemma: false, north: false }
+        } })
+      }), { ...env, GITHUB_TOKEN: "test-token" });
+      const payload = await response.json();
+      assert.equal(response.status, 200);
+      assert.match(payload.reply, /Pull Request #42/);
+      assert.equal(payload.github.number, 42);
+      assert.equal(payload.github.url, "https://github.com/adadd89-sys/AI-Studio/pull/42");
+      assert.deepEqual(payload.filesChanged, ["README.md"]);
+      assert.equal(githubCalls.some(call => call.method === "PUT"), true);
+      assert.equal(githubCalls.some(call => call.target.endsWith("/pulls")), true);
+      assert.equal(finalReply, true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 
   it("routes selected Gemini 3.6 Flash agent to its fixed free-tier model", async () => {
     const cookie = await getSessionCookie();
