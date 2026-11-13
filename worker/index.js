@@ -88,14 +88,33 @@ export default {
       if (!env.AI_STUDIO_WORKFLOW) return json({ error: "Cloudflare Workflow не настроен." }, 503);
       const jobId = url.pathname.slice("/api/execute/".length);
       if (!/^[a-zA-Z0-9_-]{1,128}$/.test(jobId)) return json({ error: "Недопустимый идентификатор задачи." }, 400);
+      let ownerId = null;
+      let taskRecord = null;
       if (env.TASKS) {
-        const userId = await taskOwner(request, env);
-        if (!userId) return json({ error: "История задач доступна только пользователям Telegram." }, 403);
-        if (!await readTask(env, userId, jobId)) return json({ error: "Задача не найдена." }, 404);
+        ownerId = await taskOwner(request, env);
+        if (!ownerId) return json({ error: "История задач доступна только пользователям Telegram." }, 403);
+        taskRecord = await readTask(env, ownerId, jobId);
+        if (!taskRecord) return json({ error: "Задача не найдена." }, 404);
       }
       try {
         const instance = await env.AI_STUDIO_WORKFLOW.get(jobId);
         const status = await instance.status();
+        if (taskRecord) {
+          const state = status.status === "complete" ? "complete"
+            : ["errored", "terminated"].includes(status.status) ? "failed"
+              : status.status === "queued" ? "queued" : "running";
+          const outputData = status.output?.data || null;
+          const errorMessage = status.error?.message || outputData?.error || null;
+          const updated = {
+            ...taskRecord,
+            state,
+            status: state === "complete" ? (outputData?.branch ? "Код подготовлен" : "Задача завершена")
+              : state === "failed" ? "Ошибка выполнения" : state === "queued" ? "В очереди" : "Выполняется",
+            ...(state === "complete" && outputData ? { result: outputData } : {}),
+            ...(state === "failed" && errorMessage ? { error: errorMessage } : {})
+          };
+          await env.TASKS.put(taskKey(ownerId, jobId), JSON.stringify(updated), { expirationTtl: TASK_TTL_SECONDS });
+        }
         return json({ jobId, status: status.status, output: status.output || null, error: status.error || null });
       } catch (error) {
         return json({ error: "Не удалось получить статус задачи.", detail: error?.message || null }, 404);
