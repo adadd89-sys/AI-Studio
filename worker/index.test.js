@@ -867,7 +867,7 @@ describe("AI Studio Worker", () => {
       }), env);
       assert.equal(response.status, 200);
       assert.equal((await response.json()).reply, "Ответ резервной модели после тайм-аута.");
-      assert.deepEqual(requestedModels, ["gemini-4-hydrogen", "gemini-4-hydrogen", "gemini-4-hydrogen", "gemini-3.8-flash"]);
+      assert.deepEqual(requestedModels, ["gemini-4-hydrogen", "gemini-3.8-flash"]);
     } finally { globalThis.fetch = originalFetch; }
   });
 
