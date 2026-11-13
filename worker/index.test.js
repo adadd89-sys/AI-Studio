@@ -867,6 +867,42 @@ describe("AI Studio Worker", () => {
     } finally { globalThis.fetch = originalFetch; }
   });
 
+  it("recovers an empty Gemini candidate through a text-only fallback request", async () => {
+    const cookie = await getSessionCookie();
+    const originalFetch = globalThis.fetch;
+    const requested = [];
+    globalThis.fetch = async (url, options = {}) => {
+      const target = String(url);
+      requested.push({
+        model: target.match(/models\/([^:]+):generateContent/)?.[1],
+        body: JSON.parse(options.body)
+      });
+      if (requested.length === 1) {
+        return new Response(JSON.stringify({ candidates: [{ content: { parts: [] }, finishReason: "MAX_TOKENS" }] }), {
+          status: 200, headers: { "content-type": "application/json" }
+        });
+      }
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "Вот мой ответ." }] } }] }), {
+        status: 200, headers: { "content-type": "application/json" }
+      });
+    };
+    try {
+      const response = await worker.fetch(new Request("https://studio.test/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+        body: JSON.stringify({ message: "Привет", teamSettings: { agents: { gemini: true, qwen: false, gemma: false, north: false } } })
+      }), env);
+      const payload = await response.json();
+      assert.equal(response.status, 200);
+      assert.equal(payload.reply, "Вот мой ответ.");
+      assert.deepEqual(requested.map(item => item.model), ["gemini-4-hydrogen", "gemini-3.8-flash"]);
+      assert.equal(requested[1].body.tools, undefined);
+      assert.match(requested[1].body.contents.at(-1).parts.at(-1).text, /Не вызывай инструменты/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("routes selected Gemini 3.6 Flash agent to its fixed free-tier model", async () => {
     const cookie = await getSessionCookie();
     const originalFetch = globalThis.fetch;
