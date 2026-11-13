@@ -31,6 +31,80 @@ async function readTask(env, userId, jobId) {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    if (url.pathname === "/api/projects" && request.method === "GET") {
+      const denied = await authenticated(request, env);
+      if (denied) return denied;
+      if (!env.TASKS) return json({ error: "Серверное хранилище не настроено. Добавьте Cloudflare KV binding TASKS." }, 503);
+      const userId = await taskOwner(request, env);
+      if (!userId) return json({ error: "Проекты доступны через Telegram Mini App." }, 403);
+      try {
+        const listed = await env.TASKS.list({ prefix: "user:" + userId + ":project:", limit: 100 });
+        const projects = await Promise.all((listed.keys || []).map(async key => {
+          const raw = await env.TASKS.get(key.name);
+          try { return raw ? JSON.parse(raw) : null; } catch { return null; }
+        }));
+        return json({ ok: true, projects: projects.filter(Boolean).sort((a, b) => b.updatedAt - a.updatedAt) });
+      } catch {
+        return json({ error: "Не удалось загрузить проекты." }, 502);
+      }
+    }
+
+    if (url.pathname === "/api/projects" && request.method === "POST") {
+      const denied = await authenticated(request, env);
+      if (denied) return denied;
+      if (!env.TASKS) return json({ error: "Серверное хранилище не настроено. Добавьте Cloudflare KV binding TASKS." }, 503);
+      const userId = await taskOwner(request, env);
+      if (!userId) return json({ error: "Создание проектов доступно через Telegram Mini App." }, 403);
+      if (new URL(request.headers.get("origin") || "https://invalid.local").host !== new URL(request.url).host) return json({ error: "Недопустимый источник запроса." }, 403);
+      const body = await request.json().catch(() => null);
+      const name = typeof body?.name === "string" ? body.name.trim() : "";
+      const description = typeof body?.description === "string" ? body.description.trim() : "";
+      if (!name || name.length > 100) return json({ error: "Название проекта обязательно и не должно превышать 100 символов." }, 400);
+      if (description.length > 1000) return json({ error: "Описание проекта не должно превышать 1000 символов." }, 400);
+      const id = crypto.randomUUID();
+      const now = Date.now();
+      const project = { id, name, description, status: "active", createdAt: now, updatedAt: now, taskCount: 0 };
+      try {
+        await env.TASKS.put("user:" + userId + ":project:" + id, JSON.stringify(project), { expirationTtl: TASK_TTL_SECONDS });
+        return json({ ok: true, project }, 201);
+      } catch {
+        return json({ error: "Не удалось сохранить проект." }, 502);
+      }
+    }
+
+    if (url.pathname.startsWith("/api/projects/") && request.method === "PATCH") {
+      const denied = await authenticated(request, env);
+      if (denied) return denied;
+      if (!env.TASKS) return json({ error: "Серверное хранилище не настроено." }, 503);
+      const userId = await taskOwner(request, env);
+      if (!userId) return json({ error: "Изменение проектов доступно через Telegram Mini App." }, 403);
+      if (new URL(request.headers.get("origin") || "https://invalid.local").host !== new URL(request.url).host) return json({ error: "Недопустимый источник запроса." }, 403);
+      const id = url.pathname.slice("/api/projects/".length);
+      if (!/^[a-f0-9-]{36}$/i.test(id)) return json({ error: "Недопустимый ID проекта." }, 400);
+      const key = "user:" + userId + ":project:" + id;
+      const raw = await env.TASKS.get(key);
+      if (!raw) return json({ error: "Проект не найден." }, 404);
+      let project;
+      try { project = JSON.parse(raw); } catch { return json({ error: "Запись проекта повреждена." }, 500); }
+      const body = await request.json().catch(() => null);
+      if (!body || typeof body !== "object") return json({ error: "Ожидается JSON с изменениями проекта." }, 400);
+      if (body.name !== undefined) {
+        if (typeof body.name !== "string" || !body.name.trim() || body.name.trim().length > 100) return json({ error: "Название должно содержать от 1 до 100 символов." }, 400);
+        project.name = body.name.trim();
+      }
+      if (body.description !== undefined) {
+        if (typeof body.description !== "string" || body.description.trim().length > 1000) return json({ error: "Описание не должно превышать 1000 символов." }, 400);
+        project.description = body.description.trim();
+      }
+      if (body.status !== undefined) {
+        if (!["active", "paused", "completed"].includes(body.status)) return json({ error: "Недопустимый статус проекта." }, 400);
+        project.status = body.status;
+      }
+      project.updatedAt = Date.now();
+      await env.TASKS.put(key, JSON.stringify(project), { expirationTtl: TASK_TTL_SECONDS });
+      return json({ ok: true, project });
+    }
+
     if (url.pathname === "/api/tasks" && request.method === "GET") {
       const denied = await authenticated(request, env);
       if (denied) return denied;
@@ -83,6 +157,17 @@ export default {
       try {
         const instance = await env.AI_STUDIO_WORKFLOW.create({ params: { task, teamSettings } });
         const jobId = await instance.id;
+        const bodyProjectId = body?.projectId;
+        let project = null;
+        if (bodyProjectId !== undefined && bodyProjectId !== null && bodyProjectId !== "") {
+          if (typeof bodyProjectId !== "string" || !/^[a-f0-9-]{36}$/i.test(bodyProjectId)) return json({ error: "Недопустимый ID проекта." }, 400);
+          const projectRaw = await env.TASKS.get("user:" + userId + ":project:" + bodyProjectId);
+          if (!projectRaw) return json({ error: "Выбранный проект не найден." }, 404);
+          project = JSON.parse(projectRaw);
+          project.taskCount = (Number(project.taskCount) || 0) + 1;
+          project.updatedAt = Date.now();
+          await env.TASKS.put("user:" + userId + ":project:" + bodyProjectId, JSON.stringify(project), { expirationTtl: TASK_TTL_SECONDS });
+        }
         const record = {
           jobId,
           title: task.slice(0, 180),
@@ -90,7 +175,8 @@ export default {
           state: "queued",
           status: "В очереди",
           teamSettings,
-          ownerId: userId
+          projectId: project?.id || null,
+          projectName: project?.name || null
         };
         await env.TASKS.put(taskKey(userId, jobId), JSON.stringify(record), { expirationTtl: TASK_TTL_SECONDS });
         return json({ ok: true, jobId, status: "queued", task: record }, 202);
