@@ -166,7 +166,7 @@ describe("AI Studio Worker", () => {
     const response = await worker.fetch(new Request("https://studio.test/api/session", {
       headers: { cookie }
     }), env);
-    assert.deepEqual(await response.json(), { authenticated: true, authConfigured: true, telegramAuthConfigured: true });
+    assert.deepEqual(await response.json(), { authenticated: true, user: { telegramUserId: 987654321, role: "owner", name: "Владелец" }, authConfigured: true, telegramAuthConfigured: true });
   });
 
   it("disables password login even when APP_PASSWORD is configured", async () => {
