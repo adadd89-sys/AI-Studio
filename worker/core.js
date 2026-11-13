@@ -731,7 +731,8 @@ export default {
             contents.push({ role: "user", parts: functionResponses });
           }
           if (!reply.trim()) {
-            const finalModel = activeModel === model ? (fallbackModels[1] || model) : model;
+            const finalModelIndex = Math.min(Math.max(0, fallbackModels.indexOf(activeModel)) + 1, fallbackModels.length - 1);
+            const finalModel = fallbackModels[finalModelIndex];
             const finalContents = contents.slice();
             const finalInstruction = "Заверши ответ пользователю на русском языке. Если ты уже выполнил действия с инструментами, кратко сообщи результат и важные детали. Если действия не выполнялись, прямо ответь на исходный вопрос. Не вызывай инструменты; дай обычный текстовый ответ.";
             const lastContent = finalContents[finalContents.length - 1];
