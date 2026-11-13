@@ -75,7 +75,7 @@ Copy the returned namespace ID into `wrangler.jsonc`:
 ]
 ```
 
-Keep the real namespace ID in your private deployment configuration; do not commit credentials. After configuring the binding, deploy the Worker. The app stores up to 100 recent tasks per Telegram account and automatically expires KV records after 90 days. Task status and completed results are refreshed from Cloudflare Workflows when the app polls them.
+Keep the real namespace ID in your private deployment configuration; do not commit credentials. After configuring the binding, deploy the Worker. The app stores up to 100 recent tasks per Telegram account and automatically expires KV records after 90 days. Task status and completed results are refreshed from Cloudflare Workflows when the app polls them. Projects use the same per-user KV namespace and retention window: users can create projects, attach new tasks to a project, and see each project's task count. Project and task records are isolated by verified Telegram user ID; password-only sessions cannot access the shared project/task APIs.
 
 ## Gemini setup
 
