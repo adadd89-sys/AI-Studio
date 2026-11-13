@@ -897,8 +897,7 @@ function App() {
                 const status = !teamSettings.agents[agent.key] ? 'Отключён' : executionResult && !agentWasUsed ? 'Не участвовал в этой задаче' : result === true ? 'Вызов подтверждён' : failed ? 'Ошибка вызова' : configured ? 'Подключение настроено · ждёт запуска' : geminiHealth === null ? 'Проверяем подключение…' : agent.key === 'north' ? 'Требуется OPENROUTER_API_KEY' : 'Не настроено';
                 return <article className="agent-card" key={agent.key}>
                   <div className="agent-card-top"><img className="agent-logo agent-logo-card" src={agent.logo} alt={agent.name + ' logo'} loading="lazy"/><span className={'agent-status ' + (result === true ? 'is-working' : failed ? 'is-error' : 'is-configured')}><span /> {status}</span></div>
-                  <h3>{agent.name}</h3><div className="agent-role">{agent.role}</div><div className="agent-model">{agent.model}</div><p>{agent.detail}</p>
-                  <div className="agent-card-bottom"><span><ShieldCheck size={14} /> {!teamSettings.agents[agent.key] ? 'Не участвует' : result === true ? 'Генерация подтверждена' : configured ? 'Провайдер настроен' : 'Требуется настройка'}</span><ChevronRight size={16} /></div>
+                  <h3>{agent.name}</h3><div className="agent-role">{agent.role}</div><p>{agent.detail}</p>
                 </article>;
               })}
             </div>
