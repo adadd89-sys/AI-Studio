@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import worker, { assertWorkflowExecutionSucceeded, hasAuthProvider } from "./core.js";
+import worker, { assertWorkflowExecutionSucceeded, getSessionIdentity, hasAuthProvider } from "./core.js";
 
 const env = { APP_PASSWORD: "correct-horse", SESSION_SECRET: "test-session-secret", GEMINI_API_KEY: "test-key" };
 
@@ -89,6 +89,8 @@ describe("AI Studio Worker", () => {
     }), { SESSION_SECRET: env.SESSION_SECRET, TELEGRAM_BOT_TOKEN: botToken });
     assert.equal(response.status, 200);
     const cookie = response.headers.get("set-cookie").split(";")[0];
+    const identity = await getSessionIdentity(new Request("https://studio.test/", { headers: { cookie } }), env.SESSION_SECRET);
+    assert.deepEqual(identity, { telegramUserId: 987654321 });
     const session = await worker.fetch(new Request("https://studio.test/api/session", { headers: { cookie } }), {
       SESSION_SECRET: env.SESSION_SECRET, TELEGRAM_BOT_TOKEN: botToken
     });
