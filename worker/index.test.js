@@ -62,6 +62,11 @@ describe("Cohere North response normalization", () => {
     assert.equal(extractCohereResponseText(p),'{"changes":[]}');
     assert.deepEqual(parseCohereChangesResponse(p).changes,[]);
   });
+  it("extracts JSON returned through an OpenRouter tool call", () => {
+    const p={choices:[{message:{content:null,tool_calls:[{function:{arguments:'{"changes":[]}'}}]}}]};
+    assert.equal(extractCohereResponseText(p),'{"changes":[]}');
+    assert.deepEqual(parseCohereChangesResponse(p).changes,[]);
+  });
   it("rejects ordinary text and empty responses", () => {
     assert.equal(parseCohereChangesResponse({choices:[{message:{content:"I changed files."}}]}),null);
     assert.equal(parseCohereChangesResponse({choices:[{message:{content:""}}]}),null);
