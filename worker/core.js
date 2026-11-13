@@ -41,6 +41,53 @@ export function parseCohereChangesResponse(payload) {
   return parsed && Array.isArray(parsed.changes) ? parsed : null;
 }
 
+export function normalizeAgentAssignments(rawAssignments, availableDevelopers, fallbackTask = "") {
+  if (!Array.isArray(availableDevelopers) || !availableDevelopers.length) {
+    throw new Error("Не включён ни один разработчик.");
+  }
+  if (!Array.isArray(rawAssignments) || rawAssignments.length === 0) {
+    if (availableDevelopers.length === 1) {
+      return [{ agent: availableDevelopers[0], task: fallbackTask, allowedPaths: [] }];
+    }
+    throw new Error("Gemini не распределил отдельные задания между всеми включёнными разработчиками.");
+  }
+
+  const assignments = [];
+  const claimedPaths = new Set();
+  for (const agent of availableDevelopers) {
+    const matches = rawAssignments.filter(item => item?.agent === agent);
+    if (matches.length !== 1) {
+      throw new Error("Gemini должен назначить ровно одно отдельное задание каждому включённому разработчику. Не получено корректное задание для " + agent + ".");
+    }
+    const item = matches[0];
+    if (typeof item.task !== "string" || !item.task.trim() || !Array.isArray(item.allowedPaths) || !item.allowedPaths.length) {
+      throw new Error("Gemini выдал неполное задание для " + agent + ": нужны текст задания и разрешённые файлы.");
+    }
+    const paths = [...new Set(item.allowedPaths)];
+    if (paths.length !== item.allowedPaths.length || paths.length > 6) {
+      throw new Error("Gemini выдал повторяющиеся или слишком многочисленные пути для " + agent + ".");
+    }
+    for (const path of paths) {
+      if (typeof path !== "string" || !validRepoPath(path) ||
+          !(path === "index.html" || path.startsWith("src/") || path.startsWith("public/") || path.startsWith("worker/")) ||
+          path.split("/").some(part => part.startsWith(".")) || path.includes("node_modules") || path.includes("dist/")) {
+        throw new Error("Gemini назначил недопустимый путь файла для " + agent + ": " + String(path));
+      }
+      if (claimedPaths.has(path)) throw new Error("Gemini назначил один файл нескольким разработчикам: " + path);
+      claimedPaths.add(path);
+    }
+    assignments.push({ agent, task: item.task.trim().slice(0, 3000), allowedPaths: paths });
+  }
+
+  if (rawAssignments.some(item => !item || !availableDevelopers.includes(item.agent))) {
+    throw new Error("Gemini назначил задачу агенту, который отключён или не является разработчиком.");
+  }
+  if (rawAssignments.length !== availableDevelopers.length) {
+    throw new Error("Gemini должен назначить ровно одно задание каждому включённому разработчику.");
+  }
+  return assignments;
+}
+
 export function normalizeWorkflowTeamSettings(rawSettings = {}) {
   const agents = rawSettings?.agents && typeof rawSettings.agents === "object" ? rawSettings.agents : {};
   return {
@@ -1345,30 +1392,7 @@ export default {
         const availableDevelopers = [];
         if (teamSettings.agents.qwen) availableDevelopers.push("qwen");
         if (teamSettings.agents.north) availableDevelopers.push("north");
-        const plannedAssignments = Array.isArray(plan.assignments)
-          ? plan.assignments.filter((item, index, all) => item && availableDevelopers.includes(item.agent) &&
-              all.findIndex(candidate => candidate?.agent === item.agent) === index &&
-              typeof item.task === "string" && item.task.trim() && Array.isArray(item.allowedPaths) && item.allowedPaths.length)
-              .slice(0, availableDevelopers.length)
-          : [];
-        const assignments = plannedAssignments.length
-          ? plannedAssignments.map(item => ({
-              agent: item.agent, task: item.task.trim().slice(0, 3000),
-              allowedPaths: Array.isArray(item.allowedPaths) ? [...new Set(item.allowedPaths.filter(path =>
-                typeof path === "string" && validRepoPath(path) &&
-                (path === "index.html" || path.startsWith("src/") || path.startsWith("public/") || path.startsWith("worker/")) &&
-                !path.split("/").some(part => part.startsWith(".")) && !path.includes("node_modules") && !path.includes("dist/")))].slice(0, 6) : []
-            }))
-          : [{ agent: availableDevelopers[0], task, allowedPaths: [] }];
-        if (!assignments.length) throw new Error("Gemini не назначил задачу ни одному включённому разработчику.");
-        if (plannedAssignments.length && assignments.some(item => !item.allowedPaths.length)) {
-          throw new Error("Gemini выдал пустой или недопустимый список файлов для одного из исполнителей. Запросите новое распределение задач.");
-        }
-        const claimedPaths = new Set();
-        for (const assignment of assignments) for (const path of assignment.allowedPaths) {
-          if (claimedPaths.has(path)) throw new Error("Gemini назначил один файл нескольким разработчикам: " + path);
-          claimedPaths.add(path);
-        }
+        const assignments = normalizeAgentAssignments(plan.assignments, availableDevelopers, task);
         const delegationResults = await Promise.all(assignments.map(async assignment => {
           const result = assignment.agent === "qwen" ? await askQwen(assignment) : await askNorth(assignment);
           return { agent: assignment.agent, task: assignment.task, allowedPaths: assignment.allowedPaths, summary: result.summary || "", changes: result.changes };
