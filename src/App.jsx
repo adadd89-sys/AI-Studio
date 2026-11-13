@@ -430,9 +430,10 @@ function App() {
           throw new Error(statusData.error?.message || 'Асинхронная задача завершилась с ошибкой.');
         }
         const nextState = statusData.status === 'queued' ? 'queued' : 'running';
-        setTasks(current => current.map(item => item.jobId === started.jobId ? {
-          ...item, state: nextState, status: nextState === 'queued' ? 'В очереди' : 'Выполняется'
-        } : item));
+        const nextLabel = nextState === 'queued' ? 'В очереди' : 'Выполняется';
+        setTasks(current => current.some(item => item.jobId === started.jobId && (item.state !== nextState || item.status !== nextLabel))
+          ? current.map(item => item.jobId === started.jobId ? { ...item, state: nextState, status: nextLabel } : item)
+          : current);
         const activeNames = [];
         if (teamSettings.agents.gemini) activeNames.push('Gemini');
         if (teamSettings.agents.qwen) activeNames.push('Qwen');
