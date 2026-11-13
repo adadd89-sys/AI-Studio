@@ -518,7 +518,8 @@ function App() {
         setLastPlan(null);
         setExecutionResult(null);
         const reply = String(data.reply || 'Ответ не получен.');
-        setChatMessages(current => [...current, { role: 'assistant', content: '', agent: data.agent }].slice(-24));
+        const agentLabel = data.agentLabel || data.agent;
+        setChatMessages(current => [...current, { role: 'assistant', content: '', agent: agentLabel }].slice(-24));
         setTask('');
         setChatStatus('Ответ получен · постепенно вывожу текст…');
         for (let index = 0; index < reply.length; index += 6) {
@@ -528,9 +529,9 @@ function App() {
             : item));
           await new Promise(resolve => setTimeout(resolve, 24));
         }
-        setChatStatus('Ответ готов · ' + (data.agent || 'ИИ'));
+        setChatStatus('Ответ готов · ' + (agentLabel || 'ИИ'));
         setUsageEvents(current => [{ id: Date.now(), at: new Date().toISOString(), mode: 'chat', intensity: teamSettings.intensity, agents: data.agentsUsed || [data.agent], requests: data.usage?.requests ?? 1, neurons: null, task: value.slice(0,160) }, ...current].slice(0,300));
-        setReviewStatus('Ответ получен от ' + data.agent + '. В режиме общения разработка и GitHub не запускаются.');
+        setReviewStatus('Ответ получен от ' + agentLabel + '. В режиме общения разработка и GitHub не запускаются.');
       } catch (error) {
         setChatStatus('Не удалось получить ответ');
         setTaskError(error.message || 'Не удалось получить ответ.');
