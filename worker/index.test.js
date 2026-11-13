@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import worker from "./core.js";
+import worker, { hasAuthProvider } from "./core.js";
 
 const env = { APP_PASSWORD: "correct-horse", SESSION_SECRET: "test-session-secret", GEMINI_API_KEY: "test-key" };
 
@@ -26,6 +26,10 @@ function planRequest(cookie, body = { task: "Создай сайт" }) {
 }
 
 describe("AI Studio Worker", () => {
+  it("accepts Telegram as an authentication provider without APP_PASSWORD", () => {
+    assert.equal(hasAuthProvider({ SESSION_SECRET: "secret", TELEGRAM_BOT_TOKEN: "bot-token", APP_PASSWORD: "" }), true);
+    assert.equal(hasAuthProvider({ SESSION_SECRET: "secret", APP_PASSWORD: "" }), false);
+  });
   it("returns health status without exposing secrets", async () => {
     const response = await worker.fetch(new Request("https://studio.test/api/health"), {});
     assert.equal(response.status, 200);
