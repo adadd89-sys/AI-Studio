@@ -874,6 +874,38 @@ describe("AI Studio Worker", () => {
     } finally { globalThis.fetch = originalFetch; }
   });
 
+  it("consults enabled Qwen and Gemma in parallel after the lead chat response", async () => {
+    const cookie = await getSessionCookie();
+    const originalFetch = globalThis.fetch;
+    const consulted = [];
+    globalThis.fetch = async url => new Response(JSON.stringify({
+      candidates: [{ content: { parts: [{ text: "Основной ответ Hydrogen." }] } }]
+    }), { status: 200, headers: { "content-type": "application/json" } });
+    const testEnv = {
+      ...env,
+      AI: { run: async model => {
+        consulted.push(model);
+        return { response: model.includes("qwen") ? "Qwen подтверждает ответ." : "Gemma замечаний не нашла." };
+      } }
+    };
+    try {
+      const response = await worker.fetch(new Request("https://studio.test/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+        body: JSON.stringify({ message: "Проверь короткий ответ", teamSettings: {
+          agents: { gemini: true, qwen: true, gemma: true, north: false }
+        } })
+      }), testEnv);
+      const payload = await response.json();
+      assert.equal(response.status, 200);
+      assert.match(payload.reply, /Основной ответ Hydrogen/);
+      assert.match(payload.reply, /Qwen: Qwen подтверждает ответ/);
+      assert.match(payload.reply, /Gemma: Gemma замечаний не нашла/);
+      assert.deepEqual(new Set(consulted), new Set(["@cf/qwen/qwen3.8-27b", "@cf/google/gemma-4-26b-a4b-it"]));
+      assert.equal(consulted.length, 2);
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
   it("switches to Gemini fallback after repeated 524 timeout responses in chat", async () => {
     const cookie = await getSessionCookie();
     const originalFetch = globalThis.fetch;
