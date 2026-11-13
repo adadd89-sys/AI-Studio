@@ -267,6 +267,39 @@ function App() {
   useEffect(() => {
     if (authState !== 'authenticated') return;
     let cancelled = false;
+    async function loadServerTasks() {
+      try {
+        const response = await fetch('/api/tasks');
+        if (!response.ok) return;
+        const data = await response.json();
+        if (cancelled || !Array.isArray(data.tasks)) return;
+        setTasks(current => {
+          const merged = new Map(current.filter(item => item.jobId).map(item => [item.jobId, item]));
+          for (const remote of data.tasks) {
+            const local = merged.get(remote.jobId) || {};
+            merged.set(remote.jobId, {
+              ...local,
+              ...remote,
+              id: remote.jobId,
+              time: local.time || new Date(remote.createdAt).toLocaleString('ru-RU'),
+              result: remote.result || local.result,
+              error: remote.error || local.error
+            });
+          }
+          const withoutJobs = current.filter(item => !item.jobId);
+          return [...merged.values(), ...withoutJobs]
+            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+            .slice(0, 100);
+        });
+      } catch { /* Keep the local task history available when KV is temporarily unreachable. */ }
+    }
+    loadServerTasks();
+    return () => { cancelled = true; };
+  }, [authState]);
+
+  useEffect(() => {
+    if (authState !== 'authenticated') return;
+    let cancelled = false;
     async function refreshPendingTasks() {
       const pending = tasks.filter(item => item.jobId && ['queued', 'running'].includes(item.state));
       for (const item of pending) {
