@@ -370,9 +370,10 @@ function App() {
         }
         const activeNames = [];
         if (teamSettings.agents.gemini) activeNames.push('Gemini');
-        activeNames.push(teamSettings.agents.qwen ? 'Qwen' : 'Cohere North Mini Code');
+        if (teamSettings.agents.qwen) activeNames.push('Qwen');
+        else activeNames.push('Cohere North Mini Code');
         if (teamSettings.agents.gemma && teamSettings.intensity >= 50) activeNames.push('Gemma');
-        if (teamSettings.agents.north && teamSettings.intensity >= 50) activeNames.push('North');
+        if (teamSettings.agents.north && teamSettings.agents.qwen && teamSettings.intensity >= 50) activeNames.push('North · ревью');
         setReviewStatus(statusData.status === 'queued'
           ? 'Задача в очереди Cloudflare Workflows…'
           : activeNames.join(', ') + ' выполняют задачу. Это может занять несколько минут…');
