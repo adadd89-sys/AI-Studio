@@ -108,9 +108,40 @@ export async function getSessionIdentity(request, secret, ownerId) {
   } catch { return null; }
 }
 
-export async function isValidSession(request, secret, ownerId) {
-  if (!/^\d{1,20}$/.test(String(ownerId || ""))) return false;
-  return Boolean(await getSessionIdentity(request, secret, ownerId));
+const ACCESS_USERS_KEY = "access:users:v1";
+
+async function readAllowedUsers(store) {
+  if (!store || typeof store.get !== "function") return [];
+  try {
+    const value = await store.get(ACCESS_USERS_KEY);
+    const users = value ? JSON.parse(value) : [];
+    return Array.isArray(users) ? users.filter(user => user && /^\\d{1,20}$/.test(String(user.telegramUserId)) && user.active !== false) : [];
+  } catch { return []; }
+}
+
+async function getAccessUser(request, env) {
+  if (!/^\\d{1,20}$/.test(String(env.TELEGRAM_OWNER_ID || ""))) return null;
+  const identity = await getSessionIdentity(request, env.SESSION_SECRET);
+  if (!identity) return null;
+  if (String(identity.telegramUserId) === String(env.TELEGRAM_OWNER_ID)) {
+    return { ...identity, role: "owner", name: "Владелец" };
+  }
+  const users = await readAllowedUsers(env.TASKS);
+  const user = users.find(item => String(item.telegramUserId) === String(identity.telegramUserId));
+  return user ? { ...identity, role: "user", name: String(user.name || "Пользователь").slice(0, 80) } : null;
+}
+
+async function isAllowedSession(request, env) {
+  return Boolean(await getAccessUser(request, env));
+}
+
+export async function isValidSession(request, secret, ownerId, usersStore) {
+  if (!/^\\d{1,20}$/.test(String(ownerId || ""))) return false;
+  const identity = await getSessionIdentity(request, secret);
+  if (!identity) return false;
+  if (String(identity.telegramUserId) === String(ownerId)) return true;
+  const users = await readAllowedUsers(usersStore);
+  return users.some(user => String(user.telegramUserId) === String(identity.telegramUserId));
 }
 
 function hasSameOrigin(request) {
