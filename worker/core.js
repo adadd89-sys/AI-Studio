@@ -1086,7 +1086,7 @@ export default {
       try {
         const planResult = teamSettings.agents.gemini ? await callGemini(
           "Ты — руководитель команды разработки AI Studio. Проанализируй задачу и составь конкретный исполнимый план для изменения текущего репозитория AI Studio. " +
-          "Верни только JSON: {\"summary\":\"...\",\"steps\":[\"...\"],\"acceptanceCriteria\":[\"...\"],\"risks\":[\"...\"],\"questions\":[],"assignments":[{"agent":"qwen|north","task":"отдельное ТЗ","allowedPaths":["src/..."]}]}. " +
+          "Верни только JSON: {\"summary\":\"...\",\"steps\":[\"...\"],\"acceptanceCriteria\":[\"...\"],\"risks\":[\"...\"],\"questions\":[],\"assignments\":[{\"agent\":\"qwen|north\",\"task\":\"отдельное ТЗ\",\"allowedPaths\":[\"src/...\"]}]}. " +
           "Если включены Qwen и North, разложи работу на независимые подзадачи и назначь их обоим; если включён только один разработчик — назначь ему всю работу. " +
           "Каждая подзадача должна иметь конкретную цель и allowedPaths — точный список файлов, которые разрешено менять. Не назначай Gemma разработчиком: она выполняет независимое ревью. " +
           "Не допускай пересечения allowedPaths между исполнителями. Если данных достаточно, questions должен быть пустым массивом. Не утверждай, что работа уже выполнена. Задача пользователя: " + task
@@ -1139,7 +1139,7 @@ export default {
               { role: "system", content: developerSystem },
               { role: "user", content: "Задача пользователя:\n" + task + "\n\nПлан Gemini:\n" + planText +
                 "\n\n" + contextText + (feedback ? "\n\nЗамечания Gemma:\n" + feedback : "") +
-                "\n\nПодготовь законченные изменения файлов. Ответ только JSON." }
+                "\n\nТвоё отдельное ТЗ от Gemini:\n" + assignment.task + "\nРазрешённые пути: " + JSON.stringify(assignment.allowedPaths || []) + (feedback ? "\n\nЗамечания ревью:\n" + feedback : "") + "\n\nПодготовь законченные изменения только по своему ТЗ. Ответ только JSON." }
             ],
             max_completion_tokens: scaledTokenBudget(intensity, 1200, 4096),
             reasoning_effort: "low",
@@ -1177,7 +1177,7 @@ export default {
             method: "POST",
             headers: { "content-type": "application/json", "authorization": "Bearer " + env.OPENROUTER_API_KEY, "http-referer": "https://ai-studio.sergey-adadd89.workers.dev", "x-title": "AI Studio" },
             body: JSON.stringify({ model: "cohere/north-mini-code:free", temperature: 0.15, max_tokens: scaledTokenBudget(intensity, 1200, 4096),
-              messages: [{ role: "system", content: developerSystem }, { role: "user", content: "Задача пользователя:\n" + task + "\n\nПлан Gemini:\n" + planText + "\n\n" + contextText + (feedback ? "\n\nЗамечания ревью:\n" + feedback : "") + "\n\nПодготовь законченные изменения файлов. Ответ только JSON." }] })
+              messages: [{ role: "system", content: developerSystem }, { role: "user", content: "Задача пользователя:\n" + task + "\n\nПлан Gemini:\n" + planText + "\n\n" + contextText + "\n\nТвоё отдельное ТЗ от Gemini:\n" + assignment.task + "\nРазрешённые пути: " + JSON.stringify(assignment.allowedPaths || []) + (feedback ? "\n\nЗамечания ревью:\n" + feedback : "") + "\n\nПодготовь законченные изменения только по своему ТЗ. Ответ только JSON." }] })
           });
           if (!response.ok) { const err = await response.text(); throw new Error("OpenRouter North Mini Code: HTTP " + response.status + " — " + err.slice(0, 300)); }
           const payload = await response.json();
