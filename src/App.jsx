@@ -744,7 +744,13 @@ function App() {
             : item));
           await new Promise(resolve => setTimeout(resolve, 24));
         }
-        setChatStatus('Ответ готов · ' + (agentLabel || 'ИИ'));
+        const usedAgentNames = (data.agentsUsed || [data.agent]).map(key => ({
+          gemini: 'Gemini 4 Hydrogen', gemini38: 'Gemini 3.8', gemini36: 'Gemini 3.6',
+          geminiLite: 'Gemini Flash-Lite', gemini31Lite: 'Gemini 3.1 Flash-Lite',
+          qwen: 'Qwen', gemma: 'Gemma', north: 'Cohere North'
+        }[key] || key));
+        setChatStatus('Ответ готов · ' + usedAgentNames.join(' + ') +
+          (data.consultationFailures ? ' · не ответили: ' + data.consultationFailures : ''));
         setUsageEvents(current => [{ id: Date.now(), at: new Date().toISOString(), mode: 'chat', intensity: teamSettings.intensity, agents: data.agentsUsed || [data.agent], requests: data.usage?.requests ?? 1, neurons: null, task: value.slice(0,160) }, ...current].slice(0,300));
         setReviewStatus(data.github ? 'Gemini подготовил изменения в GitHub и открыл Pull Request #' + data.github.number + '.' : 'Ответ получен от ' + agentLabel + '.');
       } catch (error) {
