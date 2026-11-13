@@ -407,7 +407,7 @@ function App() {
       setTask('');
       setActive('Процессы');
     } catch (error) {
-      setGeminiCallStatus(false);
+      setGeminiCallStatus(null);
       setTaskError(error.message || 'Не удалось связаться с командой ИИ.');
     } finally {
       setIsSubmitting(false);
