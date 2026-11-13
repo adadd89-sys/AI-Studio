@@ -899,8 +899,8 @@ describe("AI Studio Worker", () => {
       const payload = await response.json();
       assert.equal(response.status, 200);
       assert.match(payload.reply, /Основной ответ Hydrogen/);
-      assert.match(payload.reply, /\\*\\*Qwen:\\*\\* Qwen подтверждает ответ/);
-      assert.match(payload.reply, /\\*\\*Gemma:\\*\\* Gemma замечаний не нашла/);
+      assert.ok(payload.reply.includes("**Qwen:** Qwen подтверждает ответ."));
+      assert.ok(payload.reply.includes("**Gemma:** Gemma замечаний не нашла."));
       assert.deepEqual(new Set(consulted), new Set(["@cf/qwen/qwen3.8-27b", "@cf/google/gemma-4-26b-a4b-it"]));
       assert.equal(consulted.length, 2);
     } finally { globalThis.fetch = originalFetch; }
