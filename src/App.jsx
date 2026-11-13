@@ -235,6 +235,12 @@ function App() {
     try { return JSON.parse(localStorage.getItem('ai-studio-tasks') || '[]').slice(0, 100); } catch { return []; }
   });
   const pollingJobs = useRef(new Set());
+  const [projects, setProjects] = useState([]);
+  const [selectedProjectId, setSelectedProjectId] = useState('');
+  const [newProjectName, setNewProjectName] = useState('');
+  const [newProjectDescription, setNewProjectDescription] = useState('');
+  const [projectError, setProjectError] = useState('');
+  const [projectBusy, setProjectBusy] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [taskError, setTaskError] = useState('');
@@ -263,6 +269,17 @@ function App() {
   useEffect(() => {
     localStorage.setItem('ai-studio-tasks', JSON.stringify(tasks.slice(0, 100)));
   }, [tasks]);
+
+  useEffect(() => {
+    if (authState !== 'authenticated') return;
+    let cancelled = false;
+    fetch('/api/projects').then(async response => {
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Не удалось загрузить проекты.');
+      if (!cancelled && Array.isArray(data.projects)) setProjects(data.projects);
+    }).catch(error => { if (!cancelled) setProjectError(error.message); });
+    return () => { cancelled = true; };
+  }, [authState]);
 
   useEffect(() => {
     if (authState !== 'authenticated') return;
@@ -398,6 +415,31 @@ function App() {
     finally { setIsLoggingIn(false); }
   }
 
+  async function createProject(event) {
+    event.preventDefault();
+    const name = newProjectName.trim();
+    if (!name || projectBusy) return;
+    setProjectBusy(true);
+    setProjectError('');
+    try {
+      const response = await fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name, description: newProjectDescription.trim() })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Не удалось создать проект.');
+      setProjects(current => [data.project, ...current.filter(item => item.id !== data.project.id)]);
+      setSelectedProjectId(data.project.id);
+      setNewProjectName('');
+      setNewProjectDescription('');
+    } catch (error) {
+      setProjectError(error.message || 'Не удалось создать проект.');
+    } finally {
+      setProjectBusy(false);
+    }
+  }
+
   async function submitTask(event) {
     event.preventDefault();
     const value = task.trim();
@@ -431,7 +473,7 @@ function App() {
       const response = await fetch('/api/execute', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ task: value, teamSettings })
+        body: JSON.stringify({ task: value, teamSettings, projectId: selectedProjectId || null })
       });
       const started = await response.json();
       if (!response.ok) throw new Error(started.error || 'Не удалось запустить задачу.');
@@ -441,7 +483,7 @@ function App() {
       const jobRecord = {
         id: started.jobId, jobId: started.jobId, title: value,
         status: 'В очереди', state: 'queued', time: 'Только что',
-        createdAt: new Date().toISOString(), teamSettings
+        createdAt: new Date().toISOString(), teamSettings, projectId: selectedProjectId || null, projectName: projects.find(item => item.id === selectedProjectId)?.name || null
       };
       setTasks(current => [jobRecord, ...current.filter(item => item.jobId !== started.jobId)].slice(0, 100));
       let data = null;
