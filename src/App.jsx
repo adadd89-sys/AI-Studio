@@ -390,6 +390,7 @@ function App() {
     setQwenReview(null);
     setReviewStatus(teamSettings.agents.gemini ? 'Gemini анализирует задачу и готовит технический план…' : 'Разработчик готовит изменения по базовому плану…');
     setGeminiCallStatus(null);
+    let submittedJobId = null;
     try {
       const response = await fetch('/api/execute', {
         method: 'POST',
@@ -399,6 +400,7 @@ function App() {
       const started = await response.json();
       if (!response.ok) throw new Error(started.error || 'Не удалось запустить задачу.');
       if (!started.jobId) throw new Error('Сервер не вернул идентификатор задачи.');
+      submittedJobId = started.jobId;
 
       const jobRecord = {
         id: started.jobId, jobId: started.jobId, title: value,
@@ -473,7 +475,7 @@ function App() {
       setActive('Процессы');
     } catch (error) {
       setGeminiCallStatus(null);
-      setTasks(current => current.map(item => item.jobId && item.state !== 'complete' && item.state !== 'failed' && item.title === value && item.createdAt
+      if (submittedJobId) setTasks(current => current.map(item => item.jobId === submittedJobId && item.state !== 'complete'
         ? { ...item, state: error.message?.includes('продолжает выполняться') ? 'running' : 'failed',
             status: error.message?.includes('продолжает выполняться') ? 'Выполняется' : 'Ошибка выполнения',
             error: error.message || 'Не удалось связаться с командой ИИ.' }
