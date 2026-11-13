@@ -216,3 +216,123 @@
 .project-activity .process-list{margin-top:0}
 .project-card-actions{display:flex;flex-wrap:wrap;gap:8px}
 @media(max-width:650px){.project-detail-stats{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.project-detail-stats>div{padding:9px 7px}.project-detail-stats strong{font-size:18px}.project-detail-stats span{font-size:8px}.project-card-actions{display:grid;grid-template-columns:1fr}.project-card-actions button{justify-content:center}}
+
+
+/* AI Studio UI refresh — presentation only; application logic and API contracts unchanged */
+:root {
+  --ui-bg: #0a0c12;
+  --ui-panel: #141824;
+  --ui-panel-raised: #191e2c;
+  --ui-border: #2a3040;
+  --ui-muted: #9aa3b5;
+  --ui-accent: #9b8bff;
+}
+button, input, textarea, select { -webkit-tap-highlight-color: transparent; }
+button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: 2px solid #a99bff;
+  outline-offset: 2px;
+}
+.sidebar { width: 232px; padding: 22px 13px 15px; background: #10131c; border-color: #252a38; }
+.brand { padding-bottom: 22px; }
+.workspace-switch { margin-bottom: 22px; }
+.nav-item { min-height: 43px; border-radius: 10px; font-size: 12px; }
+.nav-item.active { background: #28243f; box-shadow: inset 3px 0 #a494ff; }
+.main-area { min-width: 0; }
+.topbar { height: 60px; }
+.page-content { max-width: 1120px; padding-top: 30px; }
+.task-panel, .settings-card, .activity-panel, .roadmap-panel, .process-card, .agent-card {
+  border-color: var(--ui-border);
+  box-shadow: 0 8px 28px rgba(0,0,0,.12);
+}
+.task-panel { border-radius: 16px; padding: 22px; }
+.task-panel textarea { min-height: 112px; font-size: 13px; border-radius: 12px; }
+.primary-button { min-height: 42px; border-radius: 10px; padding: 11px 16px; font-size: 11px; }
+.subtle-button, .text-button { min-height: 36px; }
+.settings-card { border-radius: 14px; padding: 18px; }
+.settings-title strong { font-size: 13px; }
+.settings-title span, .settings-note { line-height: 1.65; }
+.process-card { border-radius: 13px; padding: 17px; }
+.process-card-heading strong { font-size: 12px; }
+.process-summary, .process-error { font-size: 11px; }
+.agent-card { border-radius: 14px; padding: 16px; }
+.agent-card h3 { font-size: 14px; }
+.agent-card p { font-size: 10px; }
+.agent-toggle { min-height: 66px; }
+.intensity-slider { min-height: 28px; }
+.usage-metrics article { border-radius: 13px; }
+
+/* Telegram/mobile: replace the narrow icon rail with a thumb-friendly bottom bar. */
+@media (max-width: 650px) {
+  body { min-width: 320px; }
+  .app-shell { display: block; min-height: 100dvh; padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+  .sidebar {
+    position: fixed; z-index: 50; left: 0; right: 0; bottom: 0;
+    width: 100%; height: calc(68px + env(safe-area-inset-bottom));
+    min-height: 0; padding: 4px 5px env(safe-area-inset-bottom);
+    display: block; border-right: 0; border-top: 1px solid #303548;
+    background: rgba(15,18,27,.97); backdrop-filter: blur(18px);
+  }
+  .sidebar > .brand, .workspace-switch, .nav-caption, .sidebar-bottom { display: none !important; }
+  .navigation {
+    height: 60px; display: flex; align-items: stretch; gap: 3px;
+    overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain;
+    scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  }
+  .navigation::-webkit-scrollbar { display: none; }
+  .nav-item, .nav-item.active {
+    flex: 0 0 68px; width: 68px; min-width: 68px; height: 58px; min-height: 58px;
+    padding: 5px 3px 4px; display: flex; flex-direction: column; justify-content: center;
+    align-items: center; gap: 3px; border-radius: 10px; box-shadow: none;
+  }
+  .nav-item svg { width: 19px; height: 19px; }
+  .nav-item span { display: block !important; flex: 0 0 auto; max-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 8px; line-height: 1.2; }
+  .nav-item i { display: none; }
+  .nav-item.active { background: #292541; color: #d4ccff; box-shadow: inset 0 2px #a494ff; }
+  .main-area { width: 100%; padding: 0; }
+  .topbar { height: 52px; padding: 0 16px; }
+  .breadcrumbs { font-size: 12px; }
+  .topbar-right { gap: 8px; }
+  .top-avatar { width: 29px; height: 29px; }
+  .page-content { padding: 22px 14px 24px; }
+  .welcome-row { margin-bottom: 19px; }
+  .welcome-row h1 { font-size: 27px; line-height: 1.15; }
+  .welcome-row p { font-size: 12px; line-height: 1.55; }
+  .system-status { margin-top: 12px; }
+  .task-panel { padding: 16px; border-radius: 15px; }
+  .task-panel-heading { align-items: flex-start; }
+  .task-panel-heading p { font-size: 10px; line-height: 1.45; }
+  .task-panel textarea { min-height: 126px; font-size: 13px; padding: 13px; }
+  .composer-footer { display: grid; grid-template-columns: 1fr; gap: 12px; }
+  .composer-hint { max-width: none; font-size: 10px; line-height: 1.45; }
+  .composer-footer .primary-button { width: 100%; justify-content: center; min-height: 46px; font-size: 12px; }
+  .section-block { margin-top: 24px; }
+  .section-heading { align-items: center; gap: 10px; }
+  .section-heading h2 { font-size: 17px; }
+  .agent-grid { grid-template-columns: 1fr; gap: 10px; }
+  .agent-card { padding: 14px; }
+  .agent-card p { font-size: 10px; line-height: 1.55; }
+  .lower-grid { grid-template-columns: 1fr; gap: 12px; }
+  .settings-page, .processes-page, .projects-page, .usage-page { gap: 13px; }
+  .settings-card { padding: 15px; }
+  .settings-title { gap: 12px; }
+  .settings-title strong { font-size: 12px; }
+  .settings-title span, .settings-note { font-size: 10px; line-height: 1.6; }
+  .agent-toggle { min-height: 70px; gap: 10px; }
+  .agent-toggle > span:nth-child(2) { min-width: 0; }
+  .agent-toggle small { overflow-wrap: anywhere; line-height: 1.4; }
+  .mode-options { grid-template-columns: 1fr; }
+  .mode-option { min-height: 66px; }
+  .process-card { padding: 14px; gap: 9px; }
+  .process-card-heading { flex-direction: column; gap: 8px; }
+  .process-state { align-self: flex-start; font-size: 9px; }
+  .process-card-heading strong { font-size: 12px; line-height: 1.45; }
+  .process-card-heading small, .process-hint { font-size: 9px; }
+  .process-summary, .process-error { font-size: 11px; line-height: 1.6; }
+  .project-detail-stats { grid-template-columns: repeat(3,minmax(0,1fr)); }
+  .code-layout { grid-template-columns: 1fr; }
+  .editor-toolbar { flex-wrap: wrap; }
+  .editor-actions { display: flex; flex-wrap: wrap; }
+  .editor-toolbar button { min-height: 36px; }
+  .usage-metrics { grid-template-columns: 1fr; }
+  .page-footer { gap: 8px; flex-wrap: wrap; line-height: 1.5; }
+}
