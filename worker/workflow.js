@@ -1,5 +1,5 @@
 import { WorkflowEntrypoint } from "cloudflare:workers";
-import worker from "./core.js";
+import worker, { assertWorkflowExecutionSucceeded } from "./core.js";
 
 async function sign(value, secret) {
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret),
@@ -29,7 +29,7 @@ export class AIStudioWorkflow extends WorkflowEntrypoint {
       });
       const response = await worker.fetch(request, this.env);
       const data = await response.json().catch(() => ({ error: "Worker вернул некорректный JSON." }));
-      return { httpStatus: response.status, data };
+      return assertWorkflowExecutionSucceeded(response.status, data);
     });
   }
 }
