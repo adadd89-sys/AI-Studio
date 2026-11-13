@@ -866,7 +866,7 @@ function App() {
                 <strong>Результат работы команды</strong>
                 {executionResult.pullRequest?.url && <a href={executionResult.pullRequest.url} target="_blank" rel="noreferrer">Открыть Pull Request #{executionResult.pullRequest.number} →</a>}
                 {executionResult.pullRequestError && <span className="review-error">Ветка создана, но PR не открылся: {executionResult.pullRequestError}</span>}
-                {(executionResult.delegation || []).map((item, index) => <span key={item.agent + index}><strong>{item.agent === "qwen" ? "Qwen" : "Cohere North"} — отдельное задание:</strong> {item.task} · файлы: {(item.files || []).join(", ") || "изменений нет"}</span>)
+                {(executionResult.delegation || []).map((item, index) => <span key={item.agent + index}><strong>{item.agent === "qwen" ? "Qwen" : "Cohere North"} — отдельное задание:</strong> {item.task} · файлы: {(item.files || []).join(", ") || "изменений нет"}</span>)}
                 <span>Изменено файлов: {(executionResult.filesChanged || []).length}</span>
                 {(executionResult.filesChanged || []).map(file => <span key={file.path}>{file.path}</span>)}
                 <a href={'https://github.com/adadd89-sys/AI-Studio/tree/' + executionResult.branch} target="_blank" rel="noreferrer">Открыть ветку с изменениями в GitHub →</a>
