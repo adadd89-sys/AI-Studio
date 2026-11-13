@@ -115,12 +115,12 @@ async function readAllowedUsers(store) {
   try {
     const value = await store.get(ACCESS_USERS_KEY);
     const users = value ? JSON.parse(value) : [];
-    return Array.isArray(users) ? users.filter(user => user && /^\\d{1,20}$/.test(String(user.telegramUserId)) && user.active !== false) : [];
+    return Array.isArray(users) ? users.filter(user => user && /^\d{1,20}$/.test(String(user.telegramUserId)) && user.active !== false) : [];
   } catch { return []; }
 }
 
 async function getAccessUser(request, env) {
-  if (!/^\\d{1,20}$/.test(String(env.TELEGRAM_OWNER_ID || ""))) return null;
+  if (!/^\d{1,20}$/.test(String(env.TELEGRAM_OWNER_ID || ""))) return null;
   const identity = await getSessionIdentity(request, env.SESSION_SECRET);
   if (!identity) return null;
   if (String(identity.telegramUserId) === String(env.TELEGRAM_OWNER_ID)) {
@@ -136,7 +136,7 @@ async function isAllowedSession(request, env) {
 }
 
 export async function isValidSession(request, secret, ownerId, usersStore) {
-  if (!/^\\d{1,20}$/.test(String(ownerId || ""))) return false;
+  if (!/^\d{1,20}$/.test(String(ownerId || ""))) return false;
   const identity = await getSessionIdentity(request, secret);
   if (!identity) return false;
   if (String(identity.telegramUserId) === String(ownerId)) return true;
@@ -426,7 +426,7 @@ export default {
       const body = await request.json().catch(() => null);
       if (!body || typeof body !== "object") return json({ error: "Ожидается корректный JSON." }, 400);
       const telegramUserId = String(body.telegramUserId || "").trim();
-      if (!/^\\d{1,20}$/.test(telegramUserId)) return json({ error: "Укажи числовой Telegram ID (не @username)." }, 400);
+      if (!/^\d{1,20}$/.test(telegramUserId)) return json({ error: "Укажи числовой Telegram ID (не @username)." }, 400);
       if (telegramUserId === String(env.TELEGRAM_OWNER_ID)) return json({ error: "Владелец уже имеет полный доступ." }, 400);
       if (request.method === "POST") {
         if (users.some(user => String(user.telegramUserId) === telegramUserId)) return json({ error: "Этот пользователь уже добавлен." }, 409);
