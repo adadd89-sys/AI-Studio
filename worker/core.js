@@ -11,7 +11,7 @@ function scaledTokenBudget(intensity, minimum, maximum) {
 }
 
 async function fetchGeminiWithRetry(url, options) {
-  const retryable = new Set([408, 429, 500, 502, 503, 504]);
+  const retryable = new Set([408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524]);
   let lastError;
   let lastResponse = null;
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -699,7 +699,7 @@ export default {
               activeModel = candidateModel;
               const candidateUrl = "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(candidateModel) + ":generateContent?key=" + encodeURIComponent(env.GEMINI_API_KEY);
               response = await fetchGeminiWithRetry(candidateUrl, requestOptions);
-              if (response.ok || ![408, 429, 500, 502, 503, 504].includes(response.status)) break;
+              if (response.ok || ![408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524].includes(response.status)) break;
             }
             if (!response.ok) {
               const errorPayload = await response.json().catch(() => ({}));
@@ -1284,7 +1284,7 @@ export default {
       let upstream;
       try {
         upstream = await callModel(primaryModel);
-        const retryableStatuses = [429, 500, 502, 503, 504];
+        const retryableStatuses = [429, 500, 502, 503, 504, 520, 521, 522, 523, 524];
         if (!upstream.ok && retryableStatuses.includes(upstream.status) && fallbackModel !== primaryModel) {
           model = fallbackModel;
           fallbackUsed = true;
