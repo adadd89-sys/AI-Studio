@@ -772,6 +772,66 @@ export default {
           reply = payload?.choices?.[0]?.message?.content || payload?.choices?.[0]?.message?.reasoning_content || "";
         }
         if (!reply.trim()) throw new Error("Агент вернул пустой ответ.");
+
+        // Enabled chat agents work as a parallel consultation team, not merely as
+        // sequential fallbacks. The lead answer is retained; short independent
+        // notes are appended so one slow/failed reviewer cannot block the others.
+        const consultations = [];
+        const consultTasks = [];
+        const teamPrompt = "Дай независимую краткую проверку ответа ведущего агента. Найди одну полезную поправку, риск или дополнительный аспект; если ответ корректен, подтверди это. Не повторяй ответ целиком. До 2 коротких предложений, по-русски.\n\nЗапрос пользователя: " + message + "\n\nОтвет ведущего агента: " + reply.slice(0, 5000);
+        if (agent !== "qwen" && enabled.qwen !== false && env.AI) {
+          consultTasks.push((async () => {
+            const result = await env.AI.run(env.QWEN_MODEL || "@cf/qwen/qwen3.8-27b", {
+              messages: [
+                { role: "system", content: "Ты — независимый эксперт Qwen в команде AI Studio. " + teamPrompt },
+                { role: "user", content: "Проведи независимую проверку." }
+              ],
+              max_completion_tokens: 320, temperature: 0.2
+            });
+            const note = result?.response || result?.choices?.[0]?.message?.content || "";
+            if (note.trim()) consultations.push({ agent: "Qwen", note: note.trim() });
+          })());
+        }
+        if (agent !== "gemma" && enabled.gemma !== false && env.AI) {
+          consultTasks.push((async () => {
+            const result = await env.AI.run(env.GEMMA_MODEL || "@cf/google/gemma-4-26b-a4b-it", {
+              messages: [
+                { role: "system", content: "Ты — независимый аналитик Gemma в команде AI Studio. " + teamPrompt },
+                { role: "user", content: "Проведи независимую проверку." }
+              ],
+              max_completion_tokens: 320, temperature: 0.2
+            });
+            const note = result?.response || result?.choices?.[0]?.message?.content || "";
+            if (note.trim()) consultations.push({ agent: "Gemma", note: note.trim() });
+          })());
+        }
+        if (agent !== "north" && enabled.north === true && env.OPENROUTER_API_KEY) {
+          consultTasks.push((async () => {
+            const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+              method: "POST",
+              headers: { "content-type": "application/json", "authorization": "Bearer " + env.OPENROUTER_API_KEY, "http-referer": "https://ai-studio.sergey-adadd89.workers.dev", "x-title": "AI Studio" },
+              body: JSON.stringify({
+                model: "cohere/north-mini-code:free", max_tokens: 320, temperature: 0.2,
+                messages: [
+                  { role: "system", content: "Ты — независимый эксперт Cohere North в команде AI Studio. " + teamPrompt },
+                  { role: "user", content: "Проведи независимую проверку." }
+                ]
+              }),
+              signal: AbortSignal.timeout(8000)
+            });
+            if (!response.ok) throw new Error("North HTTP " + response.status);
+            const payload = await response.json();
+            const note = payload?.choices?.[0]?.message?.content || "";
+            if (note.trim()) consultations.push({ agent: "Cohere North", note: note.trim() });
+          })());
+        }
+        if (consultTasks.length) {
+          await Promise.allSettled(consultTasks);
+          if (consultations.length) {
+            reply = reply.trim() + "\n\n**Проверка команды**\n" + consultations.map(item => "**" + item.agent + ":** " + item.note).join("\n\n");
+          }
+        }
+
         const agentLabel = GEMINI_AGENT_LABELS[agent] || (agent === "qwen" ? "Qwen" : agent === "gemma" ? "Gemma" : "Cohere North");
         return json({ ok: true, reply: reply.trim(), agent, agentLabel, agentsUsed: [agent], github: githubState.pullRequest, filesChanged: [...githubState.writtenFiles], usage: { requests: 1, neurons: null } });
       } catch (error) {
