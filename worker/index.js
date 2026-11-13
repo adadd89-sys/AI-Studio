@@ -15,9 +15,30 @@ async function authenticated(request, env) {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    if (url.pathname === "/api/tasks" && request.method === "GET") {
+      const denied = await authenticated(request, env);
+      if (denied) return denied;
+      if (!env.TASKS) return json({ error: "Серверная история не настроена. Добавьте Cloudflare KV binding TASKS." }, 503);
+      const userId = await taskOwner(request, env);
+      if (!userId) return json({ error: "Для общей истории войдите через Telegram Mini App." }, 403);
+      try {
+        const listed = await env.TASKS.list({ prefix: "user:" + userId + ":task:", limit: 100 });
+        const records = await Promise.all((listed.keys || []).map(async key => {
+          const raw = await env.TASKS.get(key.name);
+          try { return raw ? JSON.parse(raw) : null; } catch { return null; }
+        }));
+        return json({ ok: true, tasks: records.filter(Boolean).sort((a, b) => b.createdAt - a.createdAt) });
+      } catch {
+        return json({ error: "Не удалось загрузить серверную историю задач." }, 502);
+      }
+    }
+
     if (url.pathname === "/api/execute" && request.method === "POST") {
       const denied = await authenticated(request, env);
       if (denied) return denied;
+      if (!env.TASKS) return json({ error: "Серверная история не настроена. Добавьте Cloudflare KV binding TASKS." }, 503);
+      const userId = await taskOwner(request, env);
+      if (!userId) return json({ error: "Запуск задач доступен через Telegram Mini App для привязки истории к аккаунту." }, 403);
       let origin;
       try { origin = new URL(request.headers.get("origin") || ""); } catch { return json({ error: "Недопустимый источник запроса." }, 403); }
       if (origin.host !== url.host) return json({ error: "Недопустимый источник запроса." }, 403);
@@ -45,7 +66,18 @@ export default {
       if (task.length > 6000) return json({ error: "Задача слишком длинная. Максимум — 6000 символов." }, 413);
       try {
         const instance = await env.AI_STUDIO_WORKFLOW.create({ params: { task, teamSettings } });
-        return json({ ok: true, jobId: await instance.id, status: "queued" }, 202);
+        const jobId = await instance.id;
+        const record = {
+          jobId,
+          title: task.slice(0, 180),
+          createdAt: Date.now(),
+          state: "queued",
+          status: "В очереди",
+          teamSettings,
+          ownerId: userId
+        };
+        await env.TASKS.put(taskKey(userId, jobId), JSON.stringify(record), { expirationTtl: TASK_TTL_SECONDS });
+        return json({ ok: true, jobId, status: "queued", task: record }, 202);
       } catch (error) {
         return json({ error: "Не удалось создать асинхронную задачу.", detail: error?.message || null }, 502);
       }
@@ -56,6 +88,11 @@ export default {
       if (!env.AI_STUDIO_WORKFLOW) return json({ error: "Cloudflare Workflow не настроен." }, 503);
       const jobId = url.pathname.slice("/api/execute/".length);
       if (!/^[a-zA-Z0-9_-]{1,128}$/.test(jobId)) return json({ error: "Недопустимый идентификатор задачи." }, 400);
+      if (env.TASKS) {
+        const userId = await taskOwner(request, env);
+        if (!userId) return json({ error: "История задач доступна только пользователям Telegram." }, 403);
+        if (!await readTask(env, userId, jobId)) return json({ error: "Задача не найдена." }, 404);
+      }
       try {
         const instance = await env.AI_STUDIO_WORKFLOW.get(jobId);
         const status = await instance.status();
