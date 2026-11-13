@@ -183,6 +183,18 @@ function githubError(error) {
   return json({ error: error?.message || "Не удалось выполнить запрос к GitHub." }, status);
 }
 
+export function assertWorkflowExecutionSucceeded(httpStatus, data) {
+  if (!Number.isInteger(httpStatus) || httpStatus < 200 || httpStatus >= 300 || data?.error) {
+    const message = typeof data?.error === "string" && data.error.trim()
+      ? data.error
+      : "Внутреннее выполнение AI Studio завершилось с HTTP " + httpStatus + ".";
+    const error = new Error(message);
+    error.status = httpStatus;
+    throw error;
+  }
+  return { httpStatus, data };
+}
+
 export function hasAuthProvider(env) {
   return Boolean(env.SESSION_SECRET && (env.APP_PASSWORD || env.TELEGRAM_BOT_TOKEN));
 }
