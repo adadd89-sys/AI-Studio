@@ -1,6 +1,9 @@
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" };
 const SESSION_COOKIE = "ai_studio_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
+const FREE_GEMINI_MODELS = new Set(["gemini-4-hydrogen", "gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]);
+const GEMINI_AGENT_MODELS = { gemini: "gemini-4-hydrogen", gemini38: "gemini-3.8-flash", gemini36: "gemini-3.6-flash", geminiLite: "gemini-3.5-flash-lite", gemini31Lite: "gemini-3.1-flash-lite" };
+const GEMINI_AGENT_LABELS = { gemini: "Gemini 4 Hydrogen", gemini38: "Gemini 3.8 Flash", gemini36: "Gemini 3.6 Flash", geminiLite: "Gemini 3.5 Flash-Lite", gemini31Lite: "Gemini 3.1 Flash-Lite" };
 
 function scaledTokenBudget(intensity, minimum, maximum) {
   const level = Math.max(0, Math.min(100, Number.isFinite(Number(intensity)) ? Number(intensity) : 60));
@@ -521,17 +524,19 @@ export default {
       if (message.length > 4000) return json({ error: "Сообщение слишком длинное. Максимум — 4000 символов." }, 413);
       const raw = body?.teamSettings && typeof body.teamSettings === "object" ? body.teamSettings : {};
       const enabled = raw.agents && typeof raw.agents === "object" ? raw.agents : {};
-      const agent = enabled.gemini !== false ? "gemini" : enabled.qwen !== false ? "qwen" : enabled.north === true ? "north" : enabled.gemma !== false ? "gemma" : null;
+      const agent = enabled.gemini !== false ? "gemini" : enabled.gemini38 === true ? "gemini38" : enabled.gemini36 === true ? "gemini36" : enabled.geminiLite === true ? "geminiLite" : enabled.gemini31Lite === true ? "gemini31Lite" : enabled.qwen !== false ? "qwen" : enabled.north === true ? "north" : enabled.gemma !== false ? "gemma" : null;
       if (!agent) return json({ error: "Включите хотя бы одного ИИ-агента в настройках." }, 400);
       const intensity = Math.max(0, Math.min(100, Number.isFinite(Number(raw.intensity)) ? Number(raw.intensity) : 20));
       const history = Array.isArray(body?.history) ? body.history.slice(-12).filter(item => item && ["user","assistant"].includes(item.role) && typeof item.content === "string").map(item => ({ role: item.role, content: item.content.slice(0, 4000) })) : [];
       const messages = [...history, { role: "user", content: message }];
       try {
         let reply = "";
-        if (agent === "gemini") {
+        if (agent.startsWith("gemini")) {
           if (!env.GEMINI_API_KEY) return json({ error: "Gemini включён, но GEMINI_API_KEY не настроен." }, 503);
+          const configuredModel = agent === "gemini" && FREE_GEMINI_MODELS.has(env.GEMINI_MODEL) ? env.GEMINI_MODEL : GEMINI_AGENT_MODELS[agent];
+          const model = FREE_GEMINI_MODELS.has(configuredModel) ? configuredModel : GEMINI_AGENT_MODELS[agent];
           const contents = messages.map(item => ({ role: item.role === "assistant" ? "model" : "user", parts: [{ text: item.content }] }));
-          const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(env.GEMINI_MODEL || "gemini-4-hydrogen") + ":generateContent?key=" + encodeURIComponent(env.GEMINI_API_KEY), {
+          const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent?key=" + encodeURIComponent(env.GEMINI_API_KEY), {
             method: "POST", headers: { "content-type": "application/json" },
             body: JSON.stringify({ contents, generationConfig: { temperature: 0.7, maxOutputTokens: scaledTokenBudget(intensity, 512, 1536) } })
           });
@@ -554,7 +559,7 @@ export default {
           reply = payload?.choices?.[0]?.message?.content || payload?.choices?.[0]?.message?.reasoning_content || "";
         }
         if (!reply.trim()) throw new Error("Агент вернул пустой ответ.");
-        return json({ ok: true, reply: reply.trim(), agent, agentsUsed: [agent], usage: { requests: 1, neurons: null } });
+        return json({ ok: true, reply: reply.trim(), agent, agentLabel: GEMINI_AGENT_LABELS[agent] || (agent === "qwen" ? "Qwen" : agent === "gemma" ? "Gemma" : "Cohere North"), agentsUsed: [agent], usage: { requests: 1, neurons: null } });
       } catch (error) {
         return json({ error: error?.message || "Не удалось получить ответ агента." }, 502);
       }
@@ -598,6 +603,10 @@ export default {
         mode: ["chat", "normal", "max"].includes(rawSettings.mode) ? rawSettings.mode : "normal",
         agents: {
           gemini: rawSettings.agents?.gemini !== false,
+          gemini38: rawSettings.agents?.gemini38 === true,
+          gemini36: rawSettings.agents?.gemini36 === true,
+          geminiLite: rawSettings.agents?.geminiLite === true,
+          gemini31Lite: rawSettings.agents?.gemini31Lite === true,
           qwen: rawSettings.agents?.qwen !== false,
           gemma: rawSettings.agents?.gemma !== false,
           north: rawSettings.agents?.north === true
@@ -606,7 +615,7 @@ export default {
       if (!task) return json({ error: "Опишите задачу." }, 400);
       if (teamSettings.mode === "chat") return json({ error: "Для режима общения используйте отдельный маршрут /api/chat." }, 400);
       if (!teamSettings.agents.qwen && !teamSettings.agents.north) return json({ error: "Включите Qwen или Cohere North Mini Code — нужен хотя бы один разработчик." }, 400);
-      if (teamSettings.agents.gemini && !env.GEMINI_API_KEY) return json({ error: "Gemini включён, но GEMINI_API_KEY не настроен." }, 503);
+      if ((teamSettings.agents.gemini || teamSettings.agents.gemini38 || teamSettings.agents.gemini36 || teamSettings.agents.geminiLite || teamSettings.agents.gemini31Lite) && !env.GEMINI_API_KEY) return json({ error: "Gemini включён, но GEMINI_API_KEY не настроен." }, 503);
       if ((teamSettings.agents.qwen || (teamSettings.agents.gemma && teamSettings.intensity >= 50)) && !env.AI) return json({ error: "Для включённых Qwen/Gemma требуется Cloudflare Workers AI." }, 503);
       if (teamSettings.agents.north && !env.OPENROUTER_API_KEY) return json({ error: "Cohere North Mini Code включён, но OPENROUTER_API_KEY ещё не добавлен в секреты Cloudflare." }, 503);
       if (task.length > 6000) return json({ error: "Задача слишком длинная. Максимум — 6000 символов." }, 413);
@@ -615,8 +624,8 @@ export default {
       const intensity = teamSettings.mode === "max" ? 100 : teamSettings.intensity;
       const deepReview = teamSettings.agents.gemma && intensity >= 50;
       const allowRepair = intensity >= 80;
-      const primaryModel = env.GEMINI_MODEL || "gemini-4-hydrogen";
-      const fallbackModel = env.GEMINI_FALLBACK_MODEL || "gemini-3.8-flash";
+      const primaryModel = FREE_GEMINI_MODELS.has(env.GEMINI_MODEL) ? env.GEMINI_MODEL : "gemini-4-hydrogen";
+      const fallbackModel = FREE_GEMINI_MODELS.has(env.GEMINI_FALLBACK_MODEL) ? env.GEMINI_FALLBACK_MODEL : "gemini-3.8-flash";
       const qwenModel = env.QWEN_MODEL || "@cf/qwen/qwen3.8-27b";
       const gemmaModel = env.GEMMA_MODEL || "@cf/google/gemma-4-26b-a4b-it";
 
@@ -884,6 +893,25 @@ export default {
           return parsed;
         }
 
+        async function reviewWithGeminiModel(agentKey, changes) {
+          const model = GEMINI_AGENT_MODELS[agentKey];
+          if (!model || !FREE_GEMINI_MODELS.has(model)) throw new Error("Недопустимая модель Gemini для ревью.");
+          executionStage = agentKey + "_review";
+          usage.requests++;
+          if (!usage.agents.includes(agentKey)) usage.agents.push(agentKey);
+          const reviewInput = JSON.stringify({ task, plan, changes: changes.map(change => ({ path: change.path, reason: change.reason || "", content: change.content.slice(0, 14000) })) });
+          const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent?key=" + encodeURIComponent(env.GEMINI_API_KEY), {
+            method: "POST", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "Ты — независимый технический ревьюер AI Studio (" + GEMINI_AGENT_LABELS[agentKey] + "). Критически проверь изменения на соответствие задаче, ошибки, безопасность и регрессии. Верни только JSON: {\"approved\":true,\"summary\":\"...\",\"issues\":[\"...\"]}. approved=true только если изменения пригодны к сохранению. Не утверждай, что запускал тесты.\\n\\n" + reviewInput }] }], generationConfig: { responseMimeType: "application/json", maxOutputTokens: scaledTokenBudget(intensity, 700, 1400) } })
+          });
+          if (!response.ok) throw new Error(GEMINI_AGENT_LABELS[agentKey] + " review вернул HTTP " + response.status);
+          const payload = await response.json();
+          const raw = payload?.candidates?.[0]?.content?.parts?.map(part => part.text || "").join("").trim() || "";
+          const parsed = parseJsonObject(raw);
+          if (!parsed || typeof parsed.approved !== "boolean" || !Array.isArray(parsed.issues)) throw new Error(GEMINI_AGENT_LABELS[agentKey] + " вернул отзыв не в ожидаемом JSON-формате.");
+          return parsed;
+        }
+
         async function reviewWithNorth(changes) {
           executionStage = "north_review";
           usage.requests++;
@@ -909,15 +937,22 @@ export default {
           const reviews = [];
           if (deepReview) reviews.push({ agent: "gemma", result: await reviewChanges(changes) });
           if (teamSettings.agents.north && intensity >= 50) reviews.push({ agent: "north", result: await reviewWithNorth(changes) });
+          if (intensity >= 50) {
+            for (const agentKey of ["gemini38", "gemini36", "geminiLite", "gemini31Lite"]) {
+              if (teamSettings.agents[agentKey]) reviews.push({ agent: agentKey, result: await reviewWithGeminiModel(agentKey, changes) });
+            }
+          }
+          const label = item => item.agent === "north" ? "North" : item.agent === "gemma" ? "Gemma" : GEMINI_AGENT_LABELS[item.agent] || item.agent;
           return {
             approved: reviews.every(item => item.result.approved),
-            summary: reviews.map(item => (item.agent === "north" ? "North: " : "Gemma: ") + (item.result.summary || (item.result.approved ? "Одобрено" : "Есть замечания"))).join(" · ") || "Ревью пропущено согласно выбранной интенсивности.",
+            summary: reviews.map(item => label(item) + ": " + (item.result.summary || (item.result.approved ? "Одобрено" : "Есть замечания"))).join(" · ") || "Ревью пропущено согласно выбранной интенсивности.",
             issues: reviews.flatMap(item => item.result.issues || []),
             northReview: reviews.find(item => item.agent === "north")?.result || null
           };
         }
 
-        let review = deepReview || (teamSettings.agents.north && intensity >= 50)
+        const hasGeminiReviewers = ["gemini38", "gemini36", "geminiLite", "gemini31Lite"].some(key => teamSettings.agents[key]);
+        let review = deepReview || (teamSettings.agents.north && intensity >= 50) || (hasGeminiReviewers && intensity >= 50)
           ? await reviewTeam(implementation.changes)
           : { approved: true, summary: "Ревью пропущено согласно выбранной интенсивности.", issues: [], northReview: null };
         let repairAttempted = false;

@@ -729,4 +729,32 @@ describe("AI Studio Worker", () => {
     }
   });
 
+
+  it("routes selected Gemini 3.6 Flash agent to its fixed free-tier model", async () => {
+    const cookie = await getSessionCookie();
+    const originalFetch = globalThis.fetch;
+    let requestedUrl = "";
+    globalThis.fetch = async url => {
+      requestedUrl = String(url);
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "Gemini 3.6 отвечает." }] } }] }), {
+        status: 200, headers: { "content-type": "application/json" }
+      });
+    };
+    try {
+      const response = await worker.fetch(new Request("https://studio.test/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+        body: JSON.stringify({ message: "Проверь", history: [], teamSettings: {
+          intensity: 50, agents: { gemini: false, gemini36: true, qwen: false, gemma: false, north: false }
+        } })
+      }), env);
+      const payload = await response.json();
+      assert.equal(response.status, 200);
+      assert.equal(payload.agent, "gemini36");
+      assert.equal(payload.agentLabel, "Gemini 3.6 Flash");
+      assert.match(requestedUrl, /models\/gemini-3\.6-flash:generateContent/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
