@@ -84,34 +84,27 @@ async function createSession(secret, identity = {}) {
   return payload + "." + signature;
 }
 
-export async function isValidSession(request, secret) {
-  if (!secret) return false;
+export async function getSessionIdentity(request, secret) {
+  if (!secret) return null;
   const cookie = request.headers.get("cookie") || "";
   const token = cookie.split(";").map(part => part.trim())
     .find(part => part.startsWith(SESSION_COOKIE + "="))?.slice(SESSION_COOKIE.length + 1);
-  if (!token) return false;
+  if (!token) return null;
   const [payload, signature, extra] = token.split(".");
-  if (!payload || !signature || extra) return false;
+  if (!payload || !signature || extra) return null;
   try {
-    const key = await crypto.subtle.importKey(
-      "raw",
-      new TextEncoder().encode(secret),
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["verify"]
-    );
-    const valid = await crypto.subtle.verify(
-      "HMAC",
-      key,
-      fromBase64Url(signature),
-      new TextEncoder().encode(payload)
-    );
-    if (!valid) return false;
+    const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret),
+      { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+    const valid = await crypto.subtle.verify("HMAC", key, fromBase64Url(signature), new TextEncoder().encode(payload));
+    if (!valid) return null;
     const data = JSON.parse(new TextDecoder().decode(fromBase64Url(payload)));
-    return Number.isInteger(data.exp) && data.exp > Math.floor(Date.now() / 1000);
-  } catch {
-    return false;
-  }
+    if (!Number.isInteger(data.exp) || data.exp <= Math.floor(Date.now() / 1000)) return null;
+    return { telegramUserId: Number.isSafeInteger(data.telegramUserId) ? data.telegramUserId : null };
+  } catch { return null; }
+}
+
+export async function isValidSession(request, secret) {
+  return Boolean(await getSessionIdentity(request, secret));
 }
 
 function hasSameOrigin(request) {
