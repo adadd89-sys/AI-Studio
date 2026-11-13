@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import worker, { assertWorkflowExecutionSucceeded, getSessionIdentity, hasAuthProvider } from "./core.js";
+import worker, { assertWorkflowExecutionSucceeded, getSessionIdentity, hasAuthProvider, normalizeWorkflowTeamSettings } from "./core.js";
 
 const env = {
   APP_PASSWORD: "correct-horse",
@@ -57,6 +57,18 @@ describe("AI Studio Worker", () => {
       () => assertWorkflowExecutionSucceeded(200, { error: "Частичные изменения не сохранены." }),
       /Частичные изменения не сохранены/
     );
+  });
+
+  it("preserves every enabled Gemini reviewer when normalizing workflow settings", () => {
+    const settings = normalizeWorkflowTeamSettings({
+      intensity: 75, mode: "normal",
+      agents: { gemini: true, gemini38: true, gemini36: false, geminiLite: true, gemini31Lite: true, qwen: true, gemma: true, north: true }
+    });
+    assert.deepEqual(settings.agents, {
+      gemini: true, gemini38: true, gemini36: false, geminiLite: true, gemini31Lite: true,
+      qwen: true, gemma: true, north: true
+    });
+    assert.equal(settings.intensity, 75);
   });
 
   it("preserves successful workflow output for status polling", () => {
