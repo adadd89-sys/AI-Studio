@@ -155,7 +155,7 @@ export default {
         try { project = JSON.parse(projectRaw); } catch { return json({ error: "Запись проекта повреждена." }, 500); }
       }
       try {
-        const instance = await env.AI_STUDIO_WORKFLOW.create({ params: { task, teamSettings } });
+        const instance = await env.AI_STUDIO_WORKFLOW.create({ params: { task, teamSettings, ownerId: String(userId) } });
         const jobId = await instance.id;
         const record = {
           jobId,
@@ -163,6 +163,10 @@ export default {
           createdAt: Date.now(),
           state: "queued",
           status: "В очереди",
+          stage: "queued",
+          stageLabel: "Задача создана и ожидает запуска",
+          agents: Object.fromEntries(Object.entries(teamSettings.agents).map(([key, enabled]) => [key, enabled ? "Ожидает" : "Отключён"])),
+          events: [{ id: Date.now() + "-queued", at: Date.now(), stage: "queued", label: "Задача создана и помещена в очередь", agents: [] }],
           teamSettings,
           projectId: project?.id || null,
           projectName: project?.name || null
@@ -195,6 +199,7 @@ export default {
       try {
         const instance = await env.AI_STUDIO_WORKFLOW.get(jobId);
         const status = await instance.status();
+        let responseTask = taskRecord;
         if (taskRecord) {
           const state = status.status === "complete" ? "complete"
             : ["errored", "terminated"].includes(status.status) ? "failed"
@@ -210,11 +215,12 @@ export default {
             ...(state === "failed" && errorMessage ? { error: errorMessage } : {})
           };
           // KV writes are billable; polling must not rewrite an unchanged task snapshot.
+          responseTask = updated;
           if (hasTaskSnapshotChanged(taskRecord, updated)) {
             await env.TASKS.put(taskKey(ownerId, jobId), JSON.stringify(updated), { expirationTtl: TASK_TTL_SECONDS });
           }
         }
-        return json({ jobId, status: status.status, output: status.output || null, error: status.error || null });
+        return json({ jobId, status: status.status, output: status.output || null, error: status.error || null, task: responseTask });
       } catch (error) {
         return json({ error: "Не удалось получить статус задачи.", detail: error?.message || null }, 404);
       }
