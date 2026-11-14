@@ -206,8 +206,23 @@ export default {
               : status.status === "queued" ? "queued" : "running";
           const outputData = status.output?.data || null;
           const errorMessage = status.error?.message || outputData?.error || null;
+          const events = Array.isArray(taskRecord.events) ? [...taskRecord.events] : [];
+          if (state === "failed" && taskRecord.state !== "failed") {
+            events.push({ id: Date.now() + "-workflow-failed", at: Date.now(), stage: "failed", label: errorMessage || "Workflow завершился с ошибкой", agents: [] });
+          } else if (state === "complete" && taskRecord.state !== "complete" && taskRecord.stage !== "complete") {
+            events.push({ id: Date.now() + "-workflow-complete", at: Date.now(), stage: "complete", label: "Workflow завершён", agents: [] });
+          }
+          const agents = { ...(taskRecord.agents || {}) };
+          if (state === "complete" || state === "failed") {
+            for (const [key, value] of Object.entries(agents)) {
+              if (value !== "Отключён" && value !== "Пропущен") agents[key] = state === "complete" ? "Завершил" : "Ошибка или прервано";
+            }
+          }
           const updated = {
             ...taskRecord,
+            agents,
+            events: events.slice(-40),
+            ...(state === "failed" ? { stage: "failed", stageLabel: "Ошибка выполнения" } : state === "complete" && taskRecord.stage !== "complete" ? { stage: "complete", stageLabel: "Задача завершена" } : {}),
             state,
             status: state === "complete" ? (outputData?.branch ? "Код подготовлен" : "Задача завершена")
               : state === "failed" ? "Ошибка выполнения" : state === "queued" ? "В очереди" : "Выполняется",
