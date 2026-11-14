@@ -1074,19 +1074,20 @@ export default {
       const task = typeof body?.task === "string" ? body.task.trim() : "";
       const teamSettings = body?.teamSettings && typeof body.teamSettings === "object" ? body.teamSettings : {};
       const jobId = typeof body?.jobId === "string" ? body.jobId : "";
+      const ownerId = typeof body?.ownerId === "string" ? body.ownerId : "";
       const timestamp = Number(body?.timestamp);
       const signature = request.headers.get("x-ai-studio-workflow-signature") || "";
-      if (!task || !jobId || !Number.isInteger(timestamp) || Math.abs(Date.now() - timestamp) > 5 * 60 * 1000) {
+      if (!task || !jobId || !/^\d{1,20}$/.test(ownerId) || !Number.isInteger(timestamp) || Math.abs(Date.now() - timestamp) > 5 * 60 * 1000) {
         return json({ error: "Недопустимый внутренний запрос Workflow." }, 401);
       }
-      if (!await verifyWorkflowSignature(jobId + "." + timestamp + "." + JSON.stringify({ task, teamSettings }), signature, env.SESSION_SECRET)) {
+      if (!await verifyWorkflowSignature(jobId + "." + timestamp + "." + JSON.stringify({ task, teamSettings, ownerId }), signature, env.SESSION_SECRET)) {
         return json({ error: "Подпись внутреннего запроса Workflow недействительна." }, 401);
       }
       const internalRequest = new Request("https://studio.internal/api/execute", {
         method: "POST",
         headers: { "content-type": "application/json", "origin": "https://studio.internal",
           "cookie": SESSION_COOKIE + "=" + await createSession(env.SESSION_SECRET, { telegramUserId: Number(env.TELEGRAM_OWNER_ID) }) },
-        body: JSON.stringify({ task, teamSettings })
+        body: JSON.stringify({ task, teamSettings, jobId, ownerId })
       });
       return this.fetch(internalRequest, env);
     }
@@ -1101,6 +1102,8 @@ export default {
       try { body = await request.json(); } catch { return json({ error: "Ожидается корректный JSON." }, 400); }
       const task = typeof body?.task === "string" ? body.task.trim() : "";
       const rawSettings = body?.teamSettings && typeof body.teamSettings === "object" ? body.teamSettings : {};
+      const progressJobId = typeof body?.jobId === "string" ? body.jobId : "";
+      const progressOwnerId = typeof body?.ownerId === "string" && /^\d{1,20}$/.test(body.ownerId) ? body.ownerId : "";
       const teamSettings = {
         intensity: rawSettings.mode === "max" ? 100 : Math.max(0, Math.min(100, Number.isFinite(Number(rawSettings.intensity)) ? Math.round(Number(rawSettings.intensity) / 5) * 5 : 60)),
         mode: ["chat", "normal", "max"].includes(rawSettings.mode) ? rawSettings.mode : "normal",
@@ -1271,7 +1274,27 @@ export default {
       }
 
       let executionStage = "gemini_plan";
+      async function publishTaskProgress(stage, label, agentUpdates = {}) {
+        if (!progressJobId || !progressOwnerId || !env.TASKS || typeof env.TASKS.get !== "function" || typeof env.TASKS.put !== "function") return;
+        try {
+          const key = "user:" + progressOwnerId + ":task:" + progressJobId;
+          const raw = await env.TASKS.get(key);
+          if (!raw) return;
+          const record = JSON.parse(raw);
+          const agents = { ...(record.agents || {}) };
+          for (const [agent, state] of Object.entries(agentUpdates)) agents[agent] = state;
+          const now = Date.now();
+          const events = [...(Array.isArray(record.events) ? record.events : []), { id: now + "-" + stage, at: now, stage, label, agents: Object.keys(agentUpdates) }];
+          const updated = { ...record, state: "running", status: label, stage, stageLabel: label, agents, events: events.slice(-40), updatedAt: now };
+          await env.TASKS.put(key, JSON.stringify(updated), { expirationTtl: 60 * 60 * 24 * 90 });
+        } catch (progressError) {
+          console.error("AI Studio task progress update failed:", progressError?.message || progressError);
+        }
+      }
       try {
+        await publishTaskProgress("gemini_plan", "Gemini формирует технический план", {
+          gemini: teamSettings.agents.gemini ? "Работает" : "Пропущен"
+        });
         const planResult = teamSettings.agents.gemini ? await callGemini(
           "Ты — руководитель команды разработки AI Studio. Проанализируй задачу и составь конкретный исполнимый план для изменения текущего репозитория AI Studio. " +
           "Верни только JSON: {\"summary\":\"...\",\"steps\":[\"...\"],\"acceptanceCriteria\":[\"...\"],\"risks\":[\"...\"],\"questions\":[],\"assignments\":[{\"agent\":\"qwen|north\",\"task\":\"отдельное ТЗ\",\"allowedPaths\":[\"src/...\"]}]}. " +
@@ -1285,6 +1308,7 @@ export default {
         }
 
         executionStage = "github_context";
+        await publishTaskProgress("github_context", "Изучение контекста GitHub", { gemini: teamSettings.agents.gemini ? "Завершил план" : "Пропущен" });
         const mainRef = await githubRequest(env, "/repos/" + GITHUB_REPO + "/git/ref/heads/main");
         const tree = await githubRequest(env, "/repos/" + GITHUB_REPO + "/git/trees/" + mainRef.object.sha + "?recursive=1");
         const repoFiles = (tree.tree || []).filter(item => item.type === "blob").map(item => item.path).slice(0, 120);
@@ -1400,10 +1424,19 @@ export default {
         if (teamSettings.agents.qwen) availableDevelopers.push("qwen");
         if (teamSettings.agents.north) availableDevelopers.push("north");
         const assignments = normalizeAgentAssignments(plan.assignments, availableDevelopers, task);
+        await publishTaskProgress("development", "Разработчики выполняют отдельные задания", {
+          qwen: teamSettings.agents.qwen ? "Работает" : "Отключён",
+          north: teamSettings.agents.north ? "Работает" : "Отключён",
+          gemini: teamSettings.agents.gemini ? "Передал задания" : "Пропущен"
+        });
         const delegationResults = await Promise.all(assignments.map(async assignment => {
           const result = assignment.agent === "qwen" ? await askQwen(assignment) : await askNorth(assignment);
           return { agent: assignment.agent, task: assignment.task, allowedPaths: assignment.allowedPaths, summary: result.summary || "", changes: result.changes };
         }));
+        await publishTaskProgress("development_complete", "Разработчики передали результаты", {
+          qwen: teamSettings.agents.qwen ? "Завершил" : "Отключён",
+          north: teamSettings.agents.north ? "Завершил" : "Отключён"
+        });
         const mergedChanges = [];
         const changedPaths = new Set();
         for (const result of delegationResults) for (const change of result.changes) {
@@ -1505,9 +1538,25 @@ export default {
         }
 
         const hasGeminiReviewers = ["gemini38", "gemini36", "geminiLite", "gemini31Lite"].some(key => teamSettings.agents[key]);
-        let review = deepReview || (teamSettings.agents.north && intensity >= 50) || (hasGeminiReviewers && intensity >= 50)
-          ? await reviewTeam(implementation.changes)
+        const reviewEnabled = deepReview || (teamSettings.agents.north && intensity >= 50) || (hasGeminiReviewers && intensity >= 50);
+        await publishTaskProgress("review", reviewEnabled ? "Независимые агенты проверяют изменения" : "Проверка пропущена настройками", {
+          gemma: deepReview ? "Проверяет" : "Пропущен",
+          north: teamSettings.agents.north && intensity >= 50 ? "Проверяет" : "Пропущен",
+          gemini38: teamSettings.agents.gemini38 && intensity >= 50 ? "Проверяет" : "Пропущен",
+          gemini36: teamSettings.agents.gemini36 && intensity >= 50 ? "Проверяет" : "Пропущен",
+          geminiLite: teamSettings.agents.geminiLite && intensity >= 50 ? "Проверяет" : "Пропущен",
+          gemini31Lite: teamSettings.agents.gemini31Lite && intensity >= 50 ? "Проверяет" : "Пропущен"
+        });
+        let review = reviewEnabled ? await reviewTeam(implementation.changes)
           : { approved: true, summary: "Ревью пропущено согласно выбранной интенсивности.", issues: [], northReview: null };
+        await publishTaskProgress("review_complete", "Проверка изменений завершена", {
+          gemma: deepReview ? "Завершил проверку" : "Пропущен",
+          north: teamSettings.agents.north && intensity >= 50 ? "Завершил проверку" : "Пропущен",
+          gemini38: teamSettings.agents.gemini38 && intensity >= 50 ? "Завершил проверку" : "Пропущен",
+          gemini36: teamSettings.agents.gemini36 && intensity >= 50 ? "Завершил проверку" : "Пропущен",
+          geminiLite: teamSettings.agents.geminiLite && intensity >= 50 ? "Завершил проверку" : "Пропущен",
+          gemini31Lite: teamSettings.agents.gemini31Lite && intensity >= 50 ? "Завершил проверку" : "Пропущен"
+        });
         let repairAttempted = false;
         if (!review.approved && allowRepair) {
           repairAttempted = true;
@@ -1522,6 +1571,10 @@ export default {
         }, 422);
 
         executionStage = "github_save";
+        await publishTaskProgress("github_save", "Сохранение проверенных изменений в GitHub", {
+          qwen: teamSettings.agents.qwen ? "Результат принят" : "Отключён",
+          north: teamSettings.agents.north ? "Результат принят" : "Отключён"
+        });
         const branch = "ai-studio/task-" + Date.now().toString(36);
         await githubRequest(env, "/repos/" + GITHUB_REPO + "/git/refs", {
           method: "POST", body: JSON.stringify({ ref: "refs/heads/" + branch, sha: mainRef.object.sha })
@@ -1560,6 +1613,11 @@ export default {
           }) });
           pullRequest = { number: pr.number, url: pr.html_url, state: pr.state };
         } catch (prError) { pullRequestError = prError?.message || "Не удалось открыть Pull Request."; }
+        await publishTaskProgress("complete", "Задача завершена · результаты сохранены", {
+          gemini: teamSettings.agents.gemini ? "Завершил" : "Пропущен",
+          qwen: teamSettings.agents.qwen ? "Завершил" : "Отключён",
+          north: teamSettings.agents.north ? "Завершил" : "Отключён"
+        });
         return json({ ok: true, task, plan, delegation, pullRequest, pullRequestError, summary: implementation.summary || plan.summary,
           model: planResult.model, primaryModel, fallbackUsed: planResult.fallbackUsed,
           qwenModel, gemmaModel, branch, filesChanged: changed, agentsUsed: usage.agents,
@@ -1569,6 +1627,11 @@ export default {
           gemmaReview: deepReview ? (review.summary || (review.issues.length ? review.issues.join("\n") : "Изменения одобрены.")) : "Ревью пропущено согласно интенсивности.",
           reviewIssues: review.issues, northReview: review.northReview, repairAttempted });
       } catch (error) {
+        await publishTaskProgress("failed", "Ошибка на этапе: " + (executionStage || "выполнение"), {
+          gemini: teamSettings.agents.gemini ? "Ошибка или прервано" : "Пропущен",
+          qwen: teamSettings.agents.qwen ? "Ошибка или прервано" : "Отключён",
+          north: teamSettings.agents.north ? "Ошибка или прервано" : "Отключён"
+        });
         return json({
           error: error?.message || "Не удалось выполнить задачу командой ИИ.",
           stage: executionStage,
