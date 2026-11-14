@@ -791,6 +791,7 @@ function App() {
       submittedJobId = started.jobId;
 
       const jobRecord = {
+        ...(started.task || {}),
         id: started.jobId, jobId: started.jobId, title: value,
         status: 'В очереди', state: 'queued', time: 'Только что',
         createdAt: new Date().toISOString(), teamSettings, projectId: selectedProjectId || null, projectName: projects.find(item => item.id === selectedProjectId)?.name || null
@@ -803,6 +804,7 @@ function App() {
         const statusResponse = await fetch('/api/execute/' + encodeURIComponent(started.jobId));
         const statusData = await statusResponse.json().catch(() => ({}));
         if (!statusResponse.ok) throw new Error(statusData.error || 'Не удалось получить статус задачи.');
+        if (statusData.task) setTasks(current => current.map(item => item.jobId === started.jobId ? { ...item, ...statusData.task } : item));
         if (statusData.status === 'complete') {
           data = statusData.output?.data || null;
           if (!data) { workflowFailed = true; throw new Error('Workflow завершился без результата выполнения.'); }
@@ -1035,6 +1037,9 @@ function App() {
                 <div className="process-card-heading"><div><strong>{item.title}</strong><small>{item.createdAt ? new Date(item.createdAt).toLocaleString('ru-RU') : item.time}</small></div>
                   <span className={'process-state ' + (item.state === 'complete' ? 'success' : item.state === 'failed' ? 'error' : 'pending')}>{item.status}</span>
                 </div>
+                {item.stageLabel && <p className="process-hint">Этап: {item.stageLabel}</p>}
+                {item.agents && <p className="process-hint">Агенты: {Object.entries(item.agents).map(([key, state]) => ({ gemini: "Gemini 4 Hydrogen", gemini38: "Gemini 3.8", gemini36: "Gemini 3.6", geminiLite: "Gemini Flash-Lite", gemini31Lite: "Gemini 3.1 Flash-Lite", qwen: "Qwen", gemma: "Gemma", north: "Cohere North" }[key] + " — " + state)).join(" · ")}</p>}
+                {item.events?.length > 0 && <details className="process-hint"><summary>Журнал работы команды ({item.events.length})</summary><ol>{item.events.slice().reverse().map(event => <li key={event.id}>{new Date(event.at).toLocaleTimeString("ru-RU")} · {event.label}</li>)}</ol></details>}
                 {item.error && <p className="process-error">{item.error}</p>}
                 {item.result?.summary && <p className="process-summary">{item.result.summary}</p>}
                 {item.result?.branch && <div className="process-links"><a href={'https://github.com/adadd89-sys/AI-Studio/tree/' + item.result.branch} target="_blank" rel="noreferrer">Открыть ветку GitHub ↗</a><a href={'https://github.com/adadd89-sys/AI-Studio/compare/main...' + item.result.branch} target="_blank" rel="noreferrer">Сравнить изменения ↗</a></div>}
