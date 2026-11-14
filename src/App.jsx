@@ -723,6 +723,10 @@ function App() {
       /(?:реализ|разработ|созда|исправ|отлад|рефактор|архитектур|оптимиз|безопасност|интеграц|миграц|депло|тестирован|покрыти[ея] тест|pull request|\bpr\b|github|репозитор|worker|cloudflare|api|backend|frontend|typescript|javascript|react|sql|база данных|производительност|масштабирован|сравни модели|сравнительный анализ|проанализируй проект|найди причину ошибки)/i.test(value) ||
       (value.split(/[.!?;]+/).filter(part => part.trim().length > 0).length >= 4 && value.length > 180);
     const useChatRoute = teamSettings.mode === 'chat' || !requiresTeamWorkflow;
+    if (!requiresTeamWorkflow && teamSettings.mode !== 'chat') {
+      setActive('Чат с ИИ');
+      updateTeamSetting('mode', 'chat');
+    }
     if (useChatRoute) {
       setChatLoading(true);
       setChatGithubResult(null);
