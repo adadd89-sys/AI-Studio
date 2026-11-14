@@ -953,7 +953,7 @@ export default {
           } finally { if (timer) clearTimeout(timer); }
         }
         const teamPrompt = "Дай независимую краткую проверку ответа ведущего агента. Найди одну полезную поправку, риск или дополнительный аспект; если ответ корректен, подтверди это. Не повторяй ответ целиком. До 2 коротких предложений, по-русски.\n\nЗапрос пользователя: " + message + "\n\nОтвет ведущего агента: " + reply.slice(0, 5000);
-        if (agent !== "qwen" && enabled.qwen !== false && env.AI) {
+        if (needsTeamConsultation && agent !== "qwen" && enabled.qwen !== false && env.AI) {
           consultationRequests++;
           consultTasks.push(withConsultTimeout((async () => {
             const result = await env.AI.run(env.QWEN_MODEL || "@cf/qwen/qwen3.8-27b", {
@@ -968,7 +968,7 @@ export default {
             if (note.trim()) consultations.push({ agent: "Qwen", key: "qwen", note: note.trim() });
           })(), "Qwen"));
         }
-        if (agent !== "gemma" && enabled.gemma !== false && env.AI) {
+        if (needsTeamConsultation && agent !== "gemma" && enabled.gemma !== false && env.AI) {
           consultationRequests++;
           consultTasks.push(withConsultTimeout((async () => {
             const result = await env.AI.run(env.GEMMA_MODEL || "@cf/google/gemma-4-26b-a4b-it", {
@@ -982,7 +982,7 @@ export default {
             if (note.trim()) consultations.push({ agent: "Gemma", key: "gemma", note: note.trim() });
           })(), "Gemma"));
         }
-        if (agent !== "north" && enabled.north === true && env.OPENROUTER_API_KEY) {
+        if (needsTeamConsultation && agent !== "north" && enabled.north === true && env.OPENROUTER_API_KEY) {
           consultationRequests++;
           consultTasks.push(withConsultTimeout((async () => {
             const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -1012,7 +1012,7 @@ export default {
 
         const agentLabel = GEMINI_AGENT_LABELS[agent] || (agent === "qwen" ? "Qwen" : agent === "gemma" ? "Gemma" : "Cohere North");
         const agentsUsed = [...new Set([agent, ...consultations.map(item => item.key)])];
-        return json({ ok: true, reply: reply.trim(), agent, agentLabel, agentsUsed, github: githubState.pullRequest, filesChanged: [...githubState.writtenFiles], usage: { requests: 1 + consultationRequests, neurons: null }, consultationFailures: consultTasks.length - consultations.length });
+        return json({ ok: true, reply: reply.trim(), agent, agentLabel, agentsUsed, teamMode: needsTeamConsultation ? "collaborative" : "lead_only", github: githubState.pullRequest, filesChanged: [...githubState.writtenFiles], usage: { requests: 1 + consultationRequests, neurons: null }, consultationFailures: consultTasks.length - consultations.length });
       } catch (error) {
         // If the selected Gemini model chain is unavailable, hand the same request
         // to the next enabled provider instead of leaving the user without an answer.
