@@ -930,9 +930,16 @@ export default {
         }
         if (!reply.trim()) throw new Error("Агент вернул пустой ответ.");
 
-        // Enabled chat agents work as a parallel consultation team, not merely as
-        // sequential fallbacks. The lead answer is retained; short independent
-        // notes are appended so one slow/failed reviewer cannot block the others.
+        // Simple conversation requests stay on the lead model only. Consult
+        // additional agents only when the request has clear engineering/research
+        // complexity; this saves model calls and avoids unnecessary waiting.
+        const needsTeamConsultation =
+          message.length > 260 ||
+          /(?:реализ|разработ|созда|исправ|отлад|рефактор|архитектур|оптимиз|безопасност|интеграц|миграц|депло|тестирован|покрыти[ея] тест|pull request|\bpr\b|github|репозитор|worker|cloudflare|api|backend|frontend|typescript|javascript|react|sql|база данных|производительност|масштабирован|сравни модели|сравнительный анализ|проанализируй проект|найди причину ошибки)/i.test(message) ||
+          (message.split(/[.!?;]+/).filter(part => part.trim().length > 0).length >= 4 && message.length > 180);
+
+        // Complex requests may use parallel independent reviews. A slow/failed
+        // reviewer must never prevent delivery of the lead agent's answer.
         const consultations = [];
         const consultTasks = [];
         let consultationRequests = 0;
@@ -946,7 +953,7 @@ export default {
           } finally { if (timer) clearTimeout(timer); }
         }
         const teamPrompt = "Дай независимую краткую проверку ответа ведущего агента. Найди одну полезную поправку, риск или дополнительный аспект; если ответ корректен, подтверди это. Не повторяй ответ целиком. До 2 коротких предложений, по-русски.\n\nЗапрос пользователя: " + message + "\n\nОтвет ведущего агента: " + reply.slice(0, 5000);
-        if (agent !== "qwen" && enabled.qwen !== false && env.AI) {
+        if (needsTeamConsultation && agent !== "qwen" && enabled.qwen !== false && env.AI) {
           consultationRequests++;
           consultTasks.push(withConsultTimeout((async () => {
             const result = await env.AI.run(env.QWEN_MODEL || "@cf/qwen/qwen3.8-27b", {
@@ -961,7 +968,7 @@ export default {
             if (note.trim()) consultations.push({ agent: "Qwen", key: "qwen", note: note.trim() });
           })(), "Qwen"));
         }
-        if (agent !== "gemma" && enabled.gemma !== false && env.AI) {
+        if (needsTeamConsultation && agent !== "gemma" && enabled.gemma !== false && env.AI) {
           consultationRequests++;
           consultTasks.push(withConsultTimeout((async () => {
             const result = await env.AI.run(env.GEMMA_MODEL || "@cf/google/gemma-4-26b-a4b-it", {
@@ -975,7 +982,7 @@ export default {
             if (note.trim()) consultations.push({ agent: "Gemma", key: "gemma", note: note.trim() });
           })(), "Gemma"));
         }
-        if (agent !== "north" && enabled.north === true && env.OPENROUTER_API_KEY) {
+        if (needsTeamConsultation && agent !== "north" && enabled.north === true && env.OPENROUTER_API_KEY) {
           consultationRequests++;
           consultTasks.push(withConsultTimeout((async () => {
             const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -1005,7 +1012,7 @@ export default {
 
         const agentLabel = GEMINI_AGENT_LABELS[agent] || (agent === "qwen" ? "Qwen" : agent === "gemma" ? "Gemma" : "Cohere North");
         const agentsUsed = [...new Set([agent, ...consultations.map(item => item.key)])];
-        return json({ ok: true, reply: reply.trim(), agent, agentLabel, agentsUsed, github: githubState.pullRequest, filesChanged: [...githubState.writtenFiles], usage: { requests: 1 + consultationRequests, neurons: null }, consultationFailures: consultTasks.length - consultations.length });
+        return json({ ok: true, reply: reply.trim(), agent, agentLabel, agentsUsed, teamMode: needsTeamConsultation ? "collaborative" : "lead_only", github: githubState.pullRequest, filesChanged: [...githubState.writtenFiles], usage: { requests: 1 + consultationRequests, neurons: null }, consultationFailures: consultTasks.length - consultations.length });
       } catch (error) {
         // If the selected Gemini model chain is unavailable, hand the same request
         // to the next enabled provider instead of leaving the user without an answer.

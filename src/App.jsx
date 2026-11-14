@@ -718,7 +718,16 @@ function App() {
     setIsSubmitting(true);
     setTaskError('');
     setReviewFailure(null);
-    if (teamSettings.mode === 'chat') {
+    const requiresTeamWorkflow =
+      value.length > 260 ||
+      /(?:реализ|разработ|созда|исправ|отлад|рефактор|архитектур|оптимиз|безопасност|интеграц|миграц|депло|тестирован|покрыти[ея] тест|pull request|\bpr\b|github|репозитор|worker|cloudflare|api|backend|frontend|typescript|javascript|react|sql|база данных|производительност|масштабирован|сравни модели|сравнительный анализ|проанализируй проект|найди причину ошибки)/i.test(value) ||
+      (value.split(/[.!?;]+/).filter(part => part.trim().length > 0).length >= 4 && value.length > 180);
+    const useChatRoute = teamSettings.mode === 'chat' || !requiresTeamWorkflow;
+    if (!requiresTeamWorkflow && teamSettings.mode !== 'chat') {
+      setActive('Чат с ИИ');
+      updateTeamSetting('mode', 'chat');
+    }
+    if (useChatRoute) {
       setChatLoading(true);
       setChatGithubResult(null);
       const chatLead = teamSettings.agents.gemini ? 'Gemini 4 Hydrogen' : teamSettings.agents.gemini38 ? 'Gemini 3.8 Flash' : teamSettings.agents.gemini36 ? 'Gemini 3.6 Flash' : teamSettings.agents.geminiLite ? 'Gemini 3.5 Flash-Lite' : teamSettings.agents.gemini31Lite ? 'Gemini 3.1 Flash-Lite' : teamSettings.agents.qwen ? 'Qwen' : teamSettings.agents.north ? 'Cohere North' : 'Gemma';
