@@ -1449,6 +1449,11 @@ export default {
           agent, task: assignedTask, allowedPaths, summary, files: changes.map(change => change.path)
         }));
         if (!implementation.changes.length) {
+          await publishTaskProgress("complete", "Задача завершена · изменения файлов не потребовались", {
+            gemini: teamSettings.agents.gemini ? "Завершил" : "Пропущен",
+            qwen: teamSettings.agents.qwen ? "Завершил" : "Отключён",
+            north: teamSettings.agents.north ? "Завершил" : "Отключён"
+          });
           return json({ ok: true, task, plan, summary: implementation.summary || plan.summary,
             model: planResult.model, primaryModel, fallbackUsed: planResult.fallbackUsed,
             qwenModel, gemmaModel, branch: null, filesChanged: [], agentsUsed: usage.agents,
