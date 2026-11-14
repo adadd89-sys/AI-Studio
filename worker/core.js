@@ -935,7 +935,7 @@ export default {
         // complexity; this saves model calls and avoids unnecessary waiting.
         const needsTeamConsultation =
           message.length > 260 ||
-          /(?:реализ|разработ|созда|исправ|отлад|рефактор|архитектур|оптимиз|безопасност|интеграц|миграц|депло|тестирован|покрыти[ея] тест|pull request|\\bpr\\b|github|репозитор|worker|cloudflare|api|backend|frontend|typescript|javascript|react|sql|база данных|производительност|масштабирован|сравни модели|сравнительный анализ|проанализируй проект|найди причину ошибки)/i.test(message) ||
+          /(?:реализ|разработ|созда|исправ|отлад|рефактор|архитектур|оптимиз|безопасност|интеграц|миграц|депло|тестирован|покрыти[ея] тест|pull request|\bpr\b|github|репозитор|worker|cloudflare|api|backend|frontend|typescript|javascript|react|sql|база данных|производительност|масштабирован|сравни модели|сравнительный анализ|проанализируй проект|найди причину ошибки)/i.test(message) ||
           (message.split(/[.!?;]+/).filter(part => part.trim().length > 0).length >= 4 && message.length > 180);
 
         // Complex requests may use parallel independent reviews. A slow/failed
