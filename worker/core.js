@@ -930,9 +930,16 @@ export default {
         }
         if (!reply.trim()) throw new Error("Агент вернул пустой ответ.");
 
-        // Enabled chat agents work as a parallel consultation team, not merely as
-        // sequential fallbacks. The lead answer is retained; short independent
-        // notes are appended so one slow/failed reviewer cannot block the others.
+        // Simple conversation requests stay on the lead model only. Consult
+        // additional agents only when the request has clear engineering/research
+        // complexity; this saves model calls and avoids unnecessary waiting.
+        const needsTeamConsultation =
+          message.length > 260 ||
+          /(?:реализ|разработ|созда|исправ|отлад|рефактор|архитектур|оптимиз|безопасност|интеграц|миграц|депло|тестирован|покрыти[ея] тест|pull request|\\bpr\\b|github|репозитор|worker|cloudflare|api|backend|frontend|typescript|javascript|react|sql|база данных|производительност|масштабирован|сравни модели|сравнительный анализ|проанализируй проект|найди причину ошибки)/i.test(message) ||
+          (message.split(/[.!?;]+/).filter(part => part.trim().length > 0).length >= 4 && message.length > 180);
+
+        // Complex requests may use parallel independent reviews. A slow/failed
+        // reviewer must never prevent delivery of the lead agent's answer.
         const consultations = [];
         const consultTasks = [];
         let consultationRequests = 0;
