@@ -1072,7 +1072,7 @@ describe("AI Studio Worker", () => {
       const response = await worker.fetch(new Request("https://studio.test/api/chat", {
         method: "POST",
         headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
-        body: JSON.stringify({ message: "Проверь короткий ответ", teamSettings: {
+        body: JSON.stringify({ message: "Проанализируй архитектуру backend, найди риски производительности и безопасности, предложи план рефакторинга и набор интеграционных тестов.", teamSettings: {
           agents: { gemini: true, qwen: true, gemma: true, north: false }
         } })
       }), testEnv);
@@ -1086,6 +1086,39 @@ describe("AI Studio Worker", () => {
       assert.deepEqual(new Set(payload.agentsUsed), new Set(["gemini", "qwen", "gemma"]));
       assert.equal(payload.usage.requests, 3);
       assert.equal(payload.consultationFailures, 0);
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
+  it("does not start consultations for a simple chat question", async () => {
+    const cookie = await getSessionCookie();
+    const originalFetch = globalThis.fetch;
+    const consulted = [];
+    globalThis.fetch = async () => new Response(JSON.stringify({
+      candidates: [{ content: { parts: [{ text: "Короткий ответ без привлечения команды." }] } }]
+    }), { status: 200, headers: { "content-type": "application/json" } });
+    const testEnv = {
+      ...env,
+      AI: { run: async model => {
+        consulted.push(model);
+        return { response: "Этого вызова быть не должно." };
+      } }
+    };
+    try {
+      const response = await worker.fetch(new Request("https://studio.test/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+        body: JSON.stringify({ message: "Сколько будет 2 + 2?", teamSettings: {
+          agents: { gemini: true, qwen: true, gemma: true, north: true }
+        } })
+      }), testEnv);
+      const payload = await response.json();
+      assert.equal(response.status, 200);
+      assert.equal(payload.reply, "Короткий ответ без привлечения команды.");
+      assert.equal(payload.teamMode, "lead_only");
+      assert.deepEqual(payload.agentsUsed, ["gemini"]);
+      assert.equal(payload.usage.requests, 1);
+      assert.equal(payload.consultationFailures, 0);
+      assert.deepEqual(consulted, []);
     } finally { globalThis.fetch = originalFetch; }
   });
 
