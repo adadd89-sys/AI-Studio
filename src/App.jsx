@@ -509,6 +509,7 @@ function App() {
           const statusData = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(statusData.error || 'Не удалось восстановить статус задачи.');
           if (cancelled) return;
+          if (statusData.task) setTasks(current => current.map(task => task.jobId === item.jobId ? { ...task, ...statusData.task } : task));
           if (statusData.status === 'complete') {
             const data = statusData.output?.data || null;
             const error = statusData.output?.httpStatus >= 400 || data?.error
