@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import worker, { WORKFLOW_STEP_TIMEOUT, assertWorkflowExecutionSucceeded, finalizeWorkflowAgentStatuses, extractCohereResponseText, extractQwenResponseText, parseQwenChangesResponse, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isDeveloperWritablePath, normalizeAgentAssignments, normalizeGeminiPlan, normalizeWorkflowTeamSettings, parseCohereChangesResponse, applyCohereTextEdits, isWorkersAITimeoutError, runWorkersAIWithRetry } from "./core.js";
+import worker, { WORKFLOW_STEP_TIMEOUT, assertWorkflowExecutionSucceeded, finalizeWorkflowAgentStatuses, extractCohereResponseText, extractQwenResponseText, parseQwenChangesResponse, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isDeveloperWritablePath, normalizeAgentAssignments, normalizeGeminiPlan, normalizeWorkflowTeamSettings, parseCohereChangesResponse, normalizeCreatedPullRequest, applyCohereTextEdits, isWorkersAITimeoutError, runWorkersAIWithRetry } from "./core.js";
 
 const env = {
   APP_PASSWORD: "correct-horse",
@@ -47,6 +47,23 @@ function planRequest(cookie, body = { task: "Создай сайт" }) {
   });
 }
 
+
+describe("GitHub Pull Request response validation", () => {
+  it("accepts only a complete PR response for this repository", () => {
+    assert.deepEqual(normalizeCreatedPullRequest({ number: 73, html_url: "https://github.com/adadd89-sys/AI-Studio/pull/73", state: "open" }), {
+      number: 73, url: "https://github.com/adadd89-sys/AI-Studio/pull/73", state: "open"
+    });
+  });
+  it("rejects a PR response without a number", () => {
+    assert.throws(() => normalizeCreatedPullRequest({ html_url: "https://github.com/adadd89-sys/AI-Studio/pull/73" }), /неполный или некорректный ответ/);
+  });
+  it("rejects a PR response without html_url", () => {
+    assert.throws(() => normalizeCreatedPullRequest({ number: 73 }), /неполный или некорректный ответ/);
+  });
+  it("rejects a PR URL for another repository", () => {
+    assert.throws(() => normalizeCreatedPullRequest({ number: 73, html_url: "https://github.com/Al-Studio/pull/73" }), /неполный или некорректный ответ/);
+  });
+});
 
 describe("Workers AI timeout recovery", () => {
   it("recognizes Cloudflare internal error 3046 in common error shapes", () => {
