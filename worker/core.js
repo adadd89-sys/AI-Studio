@@ -1477,7 +1477,7 @@ export default {
             return fetch(endpoint, { method:"POST", headers, body:JSON.stringify({
               model:"cohere/north-mini-code:free", temperature:0.1, max_tokens:scaledTokenBudget(intensity,1800,4096), response_format:{type:"json_object"},
               messages:[
-                {role:"system",content:developerSystem.replace("Каждый content — полное содержимое файла, не diff.", "Для больших файлов используй точечные edits вместо полного файла. Каждый change содержит path и reason, а также либо content (полный файл), либо edits — массив {find, replace}; find обязан быть точным уникальным фрагментом исходного файла.") + " Обязательная схема: один JSON-объект с полями summary и changes. Никакого текста вне JSON."},
+                {role:"system",content:"Ты — разработчик AI Studio. Верни только один JSON-объект {\\\"summary\\\":\\\"...\\\",\\\"changes\\\":[{\\\"path\\\":\\\"src/styles.css\\\",\\\"reason\\\":\\\"...\\\",\\\"edits\\\":[{\\\"find\\\":\\\"точный уникальный фрагмент исходного файла\\\",\\\"replace\\\":\\\"новый фрагмент\\\"}]}]}. Для больших файлов и CSS обязательно используй edits, не переписывай файл целиком. Для небольшого файла допустимо поле content с полным содержимым. Каждый change содержит path, reason и ровно один вариант: content или edits. Не добавляй текст вне JSON. Изменяй только разрешённые пути из задания, не трогай конфигурацию, package-файлы, секреты или README. Максимум 6 файлов."},
                 {role:"user",content:instruction}
               ]
             })});
