@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import worker, { assertWorkflowExecutionSucceeded, extractCohereResponseText, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isDeveloperWritablePath, normalizeAgentAssignments, normalizeWorkflowTeamSettings, parseCohereChangesResponse, applyCohereTextEdits } from "./core.js";
+import worker, { assertWorkflowExecutionSucceeded, extractCohereResponseText, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isDeveloperWritablePath, normalizeAgentAssignments, normalizeGeminiPlan, normalizeWorkflowTeamSettings, parseCohereChangesResponse, applyCohereTextEdits } from "./core.js";
 
 const env = {
   APP_PASSWORD: "correct-horse",
@@ -1356,6 +1356,30 @@ describe("AI Studio Worker", () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+
+  it("normalizes wrapped and alternate Gemini plan formats", () => {
+    const wrapped = normalizeGeminiPlan({
+      result: {
+        title: "Улучшение карточек команды",
+        tasks: [
+          { agent: "qwen", description: "Обнови компонент карточек", allowedPaths: ["src/App.jsx"] },
+          { agent: "north", task: "Обнови стили карточек", allowedPaths: ["src/theme.css"] }
+        ]
+      }
+    });
+    assert.equal(wrapped.summary, "Улучшение карточек команды");
+    assert.equal(wrapped.steps.length, 2);
+    assert.equal(wrapped.assignments.length, 2);
+    assert.equal(wrapped.assignments[0].agent, "qwen");
+    assert.equal(wrapped.assignments[0].task, "Обнови компонент карточек");
+    assert.deepEqual(wrapped.assignments[0].allowedPaths, ["src/App.jsx"]);
+    const stringSteps = normalizeGeminiPlan({
+      summary: "План",
+      steps: "Изучи файлы; внеси изменения; проверь сборку"
+    });
+    assert.deepEqual(stringSteps.steps, ["Изучи файлы; внеси изменения; проверь сборку"]);
+    assert.equal(normalizeGeminiPlan({ message: "Не план" }), null);
   });
 
   it("detects task snapshot changes before writing to KV", () => {
