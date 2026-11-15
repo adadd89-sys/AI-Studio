@@ -1647,7 +1647,7 @@ function parseJsonObject(value) {
           }
           const rawResponse = modelText(result);
           if (!usage.agents.includes("qwen")) usage.agents.push("qwen");
-          usage.agentResults.push({ agent: "qwen", status: "success", model: qwenModel, filesReceived: contextFiles.map(file => file.path), rawResponse: rawResponse.slice(0, 12000), parsed: { summary: parsed.summary || "", changes: parsed.changes } });
+          usage.agentResults.push({ agent: "qwen", status: "success", model: qwenModel, transport: "Cloudflare Workers AI binding", providerStatus: "success", upstreamStatus: null, filesReceived: contextFiles.map(file => file.path), rawResponse: rawResponse.slice(0, 12000), parsed: { summary: parsed.summary || "", changes: parsed.changes } });
           return parsed;
         }
 
@@ -1719,7 +1719,7 @@ function parseJsonObject(value) {
           }
           const rawResponse = extractCohereResponseText(payload);
           if (!usage.agents.includes("north")) usage.agents.push("north");
-          usage.agentResults.push({ agent: "north", status: "success", model: "cohere/north-mini-code:free", filesReceived: contextFiles.map(file => file.path), rawResponse: rawResponse.slice(0, 12000), parsed: { summary: parsed.summary || "", changes: parsed.changes } });
+          usage.agentResults.push({ agent: "north", status: "success", model: "cohere/north-mini-code:free", transport: "OpenRouter HTTP API", providerStatus: "success", upstreamStatus: response.status, filesReceived: contextFiles.map(file => file.path), rawResponse: rawResponse.slice(0, 12000), parsed: { summary: parsed.summary || "", changes: parsed.changes } });
           return parsed;
         }
         await publishTaskProgress("development", "Разработчики выполняют отдельные задания", {

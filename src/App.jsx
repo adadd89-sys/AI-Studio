@@ -1120,7 +1120,10 @@ function App() {
               {agentExecutionDetails.map((entry, index) => <div className="review-failure-section" key={entry.agent + '-' + index}>
                 <strong>{({ qwen: 'Qwen', north: 'Cohere North Mini Code' }[entry.agent] || entry.agent)} · {entry.status === 'success' ? 'ответ получен' : 'ошибка выполнения'}</strong>
                 {entry.model && <p>Модель: {entry.model}</p>}
+                {entry.transport && <p>Транспорт: {entry.transport}</p>}
+                {entry.providerStatus === "success" && <p>Вызов провайдера: успешно</p>}
                 {Number.isInteger(entry.upstreamStatus) && <p>HTTP-код провайдера: {entry.upstreamStatus}</p>}
+                {entry.agent === "qwen" && entry.providerStatus === "success" && !Number.isInteger(entry.upstreamStatus) && <p>HTTP-код: не предоставляется Workers AI binding API</p>}
                 {entry.error && <p>{entry.error}</p>}
                 {entry.parsed?.summary && <p>{entry.parsed.summary}</p>}
                 {Array.isArray(entry.filesReceived) && entry.filesReceived.length > 0 && <p>Полученные файлы контекста: {entry.filesReceived.join(', ')}</p>}
