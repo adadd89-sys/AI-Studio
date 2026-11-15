@@ -1113,9 +1113,10 @@ export default {
         // GitHub operation claims in model-generated prose are not authoritative.
         // Replace unsupported PR claims with server-confirmed state before returning the reply.
         if (repositoryTask) {
-          const branch = [...githubState.createdBranches].at(-1) || null;
+          const createdBranches = [...githubState.createdBranches];
+          const branch = createdBranches.length ? createdBranches[createdBranches.length - 1] : null;
           const files = [...githubState.writtenFiles];
-          const claimsPullRequest = /pull\\s*request|\\bpr\\s*#\\d+|создал(?:а|и)?\\s+(?:pull\\s*request|pr)|создан(?:а|о)?\\s+(?:pull\\s*request|pr)|открыл(?:а|и)?\\s+(?:pull\\s*request|pr)|github\\.com\\/[^\\s]+\\/pull\\/\\d+/i.test(reply);
+          const claimsPullRequest = /pull\s*request|\bpr\s*#\d+|создал(?:а|и)?\s+(?:pull\s*request|pr)|создан(?:а|о)?\s+(?:pull\s*request|pr)|открыл(?:а|и)?\s+(?:pull\s*request|pr)|github\.com\/[^\s]+\/pull\/\d+/i.test(reply);
           if (claimsPullRequest) {
             if (githubState.pullRequest?.number && githubState.pullRequest?.url) {
               reply = "GitHub подтвердил создание Pull Request #" + githubState.pullRequest.number +
@@ -1127,13 +1128,13 @@ export default {
                   : "Сервер не сохранил изменения и не создал PR.");
             }
           } else if (githubState.pullRequest?.number && githubState.pullRequest?.url) {
-            reply += "\\n\\n**Подтверждено GitHub сервером:** создан PR #" + githubState.pullRequest.number +
+            reply += "\n\n**Подтверждено GitHub сервером:** создан PR #" + githubState.pullRequest.number +
               " — " + githubState.pullRequest.url + ".";
           } else if (files.length) {
-            reply += "\\n\\n**Статус GitHub:** файлы сохранены (" + files.join(", ") + ")" +
+            reply += "\n\n**Статус GitHub:** файлы сохранены (" + files.join(", ") + ")" +
               (branch ? " в ветке " + branch : "") + ", но Pull Request сервером не создан.";
           } else {
-            reply += "\\n\\n**Статус GitHub:** сервер не сохранил изменения и не создал Pull Request. Текст модели не является подтверждением выполнения.";
+            reply += "\n\n**Статус GitHub:** сервер не сохранил изменения и не создал Pull Request. Текст модели не является подтверждением выполнения.";
           }
         }
 
