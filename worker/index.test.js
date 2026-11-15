@@ -944,7 +944,10 @@ describe("AI Studio Worker", () => {
           { path: "src/theme.css", type: "blob" }
         ] }), { status: 200 });
       }
-      if (target.includes("/contents/src/theme.css?ref=main")) {\n        return new Response(JSON.stringify({ content: btoa(".settings { display: block; }"), sha: "e".repeat(40) }), { status: 200 });\n      }\n      if (target.includes("/contents/src/App.jsx?ref=main")) {
+      if (target.includes("/contents/src/theme.css?ref=main")) {
+        return new Response(JSON.stringify({ content: btoa(".settings { display: block; }"), sha: "e".repeat(40) }), { status: 200 });
+      }
+      if (target.includes("/contents/src/App.jsx?ref=main")) {
         return new Response(JSON.stringify({ content: btoa("export default function App() { return null; }"), sha: "a".repeat(40) }), { status: 200 });
       }
       if (target.includes("/contents/") && target.includes("?ref=ai-studio%2Ftask-")) {
@@ -958,7 +961,8 @@ describe("AI Studio Worker", () => {
       }
       if (target.includes("openrouter.ai/api/v1/chat/completions")) {
         const payload = JSON.parse(options.body);
-        const system = payload.messages?.[0]?.content || "";\n        assert.deepEqual(payload.response_format, { type: "json_object" });
+        const system = payload.messages?.[0]?.content || "";
+        assert.deepEqual(payload.response_format, { type: "json_object" });
         const result = system.includes("основной разработчик")
           ? { summary: "North подготовил стили", changes: [{ path: "src/theme.css", edits: [{ find: ".settings { display: block; }", replace: ".settings { display: grid; }" }], reason: "Стили настроек" }] }
           : { approved: true, summary: "North проверил изменения.", issues: [] };
