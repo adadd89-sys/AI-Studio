@@ -258,6 +258,7 @@ function App() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [taskError, setTaskError] = useState('');
   const [reviewFailure, setReviewFailure] = useState(null);
+  const [agentExecutionDetails, setAgentExecutionDetails] = useState([]);
   const [lastPlan, setLastPlan] = useState(null);
   const [geminiHealth, setGeminiHealth] = useState(null);
   const [geminiCallStatus, setGeminiCallStatus] = useState(null);
@@ -727,6 +728,7 @@ function App() {
     setIsSubmitting(true);
     setTaskError('');
     setReviewFailure(null);
+    setAgentExecutionDetails([]);
     const requiresTeamWorkflow =
       value.length > 260 ||
       /(?:реализ|разработ|созда|исправ|отлад|рефактор|архитектур|оптимиз|безопасност|интеграц|миграц|депло|тестирован|покрыти[ея] тест|pull request|\bpr\b|github|репозитор|worker|cloudflare|api|backend|frontend|typescript|javascript|react|sql|база данных|производительност|масштабирован|сравни модели|сравнительный анализ|проанализируй проект|найди причину ошибки)/i.test(value) ||
@@ -819,6 +821,9 @@ function App() {
           if (!data) { workflowFailed = true; throw new Error('Workflow завершился без результата выполнения.'); }
           if (statusData.output?.httpStatus >= 400 || data.error) {
             workflowFailed = true;
+            if (Array.isArray(data.usage?.agentResults) && data.usage.agentResults.length) {
+              setAgentExecutionDetails(data.usage.agentResults);
+            }
             if (data.review) setReviewFailure({
               summary: data.review.summary || 'Команда ревью обнаружила замечания.',
               issues: Array.isArray(data.review.issues) ? data.review.issues : [],
@@ -1105,6 +1110,18 @@ function App() {
             </form>
             {isSubmitting && <div className="task-progress" role="status" aria-live="polite"><span className="working-pulse"/><div><strong>Команда работает над задачей</strong><span>{reviewStatus || 'Агенты анализируют запрос и готовят результат…'}</span></div></div>}
             {taskError && <div className="task-error" role="alert">{taskError}</div>}
+            {agentExecutionDetails.length > 0 && <section className="review-failure-panel agent-execution-panel" aria-live="polite">
+              <div className="review-failure-heading"><ShieldCheck size={17}/><strong>Диагностика выполнения агентов</strong></div>
+              {agentExecutionDetails.map((entry, index) => <div className="review-failure-section" key={entry.agent + '-' + index}>
+                <strong>{({ qwen: 'Qwen', north: 'Cohere North Mini Code' }[entry.agent] || entry.agent)} · {entry.status === 'success' ? 'ответ получен' : 'ошибка выполнения'}</strong>
+                {entry.model && <p>Модель: {entry.model}</p>}
+                {Number.isInteger(entry.upstreamStatus) && <p>HTTP-код провайдера: {entry.upstreamStatus}</p>}
+                {entry.error && <p>{entry.error}</p>}
+                {entry.parsed?.summary && <p>{entry.parsed.summary}</p>}
+                {Array.isArray(entry.filesReceived) && entry.filesReceived.length > 0 && <p>Полученные файлы контекста: {entry.filesReceived.join(', ')}</p>}
+                {entry.rawResponse && <details><summary>Показать исходный ответ модели</summary><pre>{entry.rawResponse}</pre></details>}
+              </div>)}
+            </section>}
             {reviewFailure && <section className="review-failure-panel" aria-live="polite">
               <div className="review-failure-heading"><ShieldCheck size={17}/><strong>Подробности проверки команды</strong></div>
               {reviewFailure.summary && <p className="review-failure-summary">{reviewFailure.summary}</p>}
