@@ -1572,11 +1572,11 @@ function parseJsonObject(value) {
                 `{"summary":"Краткое описание","changes":[{"path":"src/styles.css","reason":"Причина","edits":[{"find":"точный уникальный фрагмент исходного CSS","replace":"готовая замена CSS"}]}]}. ` +
                 "Разрешённые пути: "+JSON.stringify(assignment.allowedPaths||[]) + ". " +
                 "Для CSS используй только точечные edits find/replace, основанные на переданном контексте. " +
-                "Если действительно нечего менять, верни {\\"summary\\":\\"Изменения не требуются\\",\\"changes\\":[]} без пояснений. " +
+                `Если действительно нечего менять, верни {"summary":"Изменения не требуются","changes":[]} без пояснений. ` +
                 "Не возвращай Markdown, комментарии или текст до/после JSON. " +
-                "\\n\\nПервый отклонённый ответ: "+diagnostic+
-                "\\n\\nВторой отклонённый ответ: "+retryRaw+
-                "\\n\\nКонтекст и задание:\\n"+userInstruction
+                "\n\nПервый отклонённый ответ: "+diagnostic+
+                "\n\nВторой отклонённый ответ: "+retryRaw+
+                "\n\nКонтекст и задание:\n"+userInstruction
               );
               if(!response.ok){const err=await response.text();throw new Error("OpenRouter North Mini Code: HTTP "+response.status+" при последней попытке формата — "+err.slice(0,300));}
               payload=await response.json();
