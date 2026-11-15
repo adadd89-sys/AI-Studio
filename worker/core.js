@@ -1726,7 +1726,12 @@ function parseJsonObject(value) {
           gemini: teamSettings.agents.gemini ? "Передал задания" : "Пропущен"
         });
         const delegationResults = await Promise.all(assignments.map(async assignment => {
-          const result = assignment.agent === "qwen" ? await askQwen(assignment) : await askNorth(assignment);
+          const result = await (assignment.agent === "qwen" ? askQwen(assignment) : askNorth(assignment)).catch(error => {
+            const failure = error instanceof Error ? error : new Error(String(error));
+            failure.agent = assignment.agent;
+            failure.agentStage = assignment.agent + "_implementation";
+            throw failure;
+          });
           return { agent: assignment.agent, task: assignment.task, allowedPaths: assignment.allowedPaths, summary: result.summary || "", changes: result.changes };
         }));
         await publishTaskProgress("development_complete", "Разработчики передали результаты", {
@@ -1800,7 +1805,6 @@ function parseJsonObject(value) {
         async function reviewWithNorth(changes) {
           executionStage = "north_review";
           usage.requests++;
-          if (!usage.agents.includes("north")) usage.agents.push("north");
           const reviewInput = JSON.stringify({ task, plan, changes: changes.map(change => ({ path: change.path, reason: change.reason || "", content: change.content.slice(0, 16000) })) });
           const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
             method: "POST",
@@ -1811,10 +1815,22 @@ function parseJsonObject(value) {
                 { role: "user", content: reviewInput }
               ] })
           });
-          if (!response.ok) throw new Error("OpenRouter North review вернул HTTP " + response.status);
+          if (!response.ok) {
+            const failure = new Error("OpenRouter North review вернул HTTP " + response.status);
+            failure.status = response.status;
+            throw failure;
+          }
           const payload = await response.json();
-          const parsed = parseJsonObject(modelText(payload));
+          const rawResponse = modelText(payload);
+          const parsed = parseJsonObject(rawResponse);
           if (!parsed || typeof parsed.approved !== "boolean" || !Array.isArray(parsed.issues)) throw new Error("North Mini Code вернула отзыв не в ожидаемом формате.");
+          if (!usage.agents.includes("north")) usage.agents.push("north");
+          usage.agentResults.push({
+            agent: "north", status: "success", model: "cohere/north-mini-code:free",
+            filesReceived: contextFiles.map(file => file.path),
+            rawResponse: rawResponse.slice(0, 12000),
+            parsed: { approved: parsed.approved, summary: parsed.summary || "", issues: parsed.issues }
+          });
           return parsed;
         }
 
@@ -1862,7 +1878,13 @@ function parseJsonObject(value) {
         if (!review.approved && allowRepair) {
           repairAttempted = true;
           const repairAssignment = { task: "Исправь изменения согласно замечаниям ревью. Исходная задача: " + task, allowedPaths: implementation.changes.map(change => change.path) };
-          implementation = teamSettings.agents.qwen ? await askQwen(repairAssignment, JSON.stringify(review)) : await askNorth(repairAssignment, JSON.stringify(review));
+          const repairAgent = teamSettings.agents.qwen ? "qwen" : "north";
+          implementation = await (repairAgent === "qwen" ? askQwen(repairAssignment, JSON.stringify(review)) : askNorth(repairAssignment, JSON.stringify(review))).catch(error => {
+            const failure = error instanceof Error ? error : new Error(String(error));
+            failure.agent = repairAgent;
+            failure.agentStage = repairAgent + "_repair";
+            throw failure;
+          });
           if (!implementation.changes.length) return json({ error: "Ревью отклонило изменения, а разработчик не предложил исправлений.", review }, 422);
           review = await reviewTeam(implementation.changes);
         }
@@ -1928,8 +1950,9 @@ function parseJsonObject(value) {
           gemmaReview: deepReview ? (review.summary || (review.issues.length ? review.issues.join("\n") : "Изменения одобрены.")) : "Ревью пропущено согласно интенсивности.",
           reviewIssues: review.issues, northReview: review.northReview, repairAttempted });
       } catch (error) {
-        const failedAgent = executionStage?.startsWith("qwen_") ? "qwen"
-          : (executionStage?.startsWith("north_") ? "north" : null);
+        const failureStage = error?.agentStage || executionStage;
+        const failedAgent = error?.agent || (failureStage?.startsWith("qwen_") ? "qwen"
+          : (failureStage?.startsWith("north_") ? "north" : null));
         if (failedAgent) {
           usage.agentResults.push(createAgentFailureDiagnostic({
             agent: failedAgent,
@@ -1939,7 +1962,7 @@ function parseJsonObject(value) {
             upstreamStatus: error?.status
           }));
         }
-        await publishTaskProgress("failed", "Ошибка на этапе: " + (executionStage || "выполнение"), {
+        await publishTaskProgress("failed", "Ошибка на этапе: " + (failureStage || "выполнение"), {
           gemini: teamSettings.agents.gemini ? "Ошибка или прервано" : "Пропущен",
           qwen: teamSettings.agents.qwen ? (failedAgent === "qwen" ? "Ошибка или прервано" : usage.agents.includes("qwen") ? "Завершил" : "Пропущен") : "Отключён",
           north: teamSettings.agents.north ? (failedAgent === "north" ? "Ошибка или прервано" : usage.agents.includes("north") ? "Завершил" : "Пропущен") : "Отключён"
@@ -1948,7 +1971,7 @@ function parseJsonObject(value) {
           error: failedAgent ? usage.agentResults.at(-1)?.error : (error?.message || "Не удалось выполнить задачу командой ИИ."),
           agentsUsed: usage.agents,
           usage: { requests: usage.requests, neurons: null, agentResults: usage.agentResults },
-          stage: executionStage,
+          stage: failureStage,
           stageLabel: ({
             gemini_plan: "Планирование Gemini",
             github_context: "Чтение контекста GitHub",
