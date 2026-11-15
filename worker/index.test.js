@@ -1249,7 +1249,8 @@ describe("AI Studio Worker", () => {
         "gemini-3.8-flash", "gemini-3.8-flash", "gemini-3.8-flash",
         "gemini-3.6-flash"
       ]);
-      assert.equal(payload.agentLabel, "Gemini 4 Hydrogen");
+      assert.equal(payload.agentLabel, "Gemini 3.6 Flash");
+      assert.equal(payload.model, "gemini-3.6-flash");
     } finally {
       globalThis.fetch = originalFetch;
     }
