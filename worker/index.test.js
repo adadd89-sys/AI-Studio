@@ -951,7 +951,7 @@ describe("AI Studio Worker", () => {
         if (model === "@cf/qwen/qwen3.8-27b") {
           return { response: JSON.stringify({
             summary: "Подготовлен экран настроек",
-            changes: [{ path: "src/new-screen.jsx", content: "export default function Settings() { return <main>Settings</main>; }", reason: "Добавить экран настроек" }]
+            changes: [{ path: "src/App.jsx", content: "export default function Settings() { return <main>Settings</main>; }", reason: "Добавить экран настроек" }]
           }) };
         }
         if (model === "@cf/google/gemma-4-26b-a4b-it") {
