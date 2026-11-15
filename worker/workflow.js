@@ -1,5 +1,5 @@
 import { WorkflowEntrypoint } from "cloudflare:workers";
-import worker, { assertWorkflowExecutionSucceeded } from "./core.js";
+import worker, { assertWorkflowExecutionSucceeded, WORKFLOW_STEP_TIMEOUT } from "./core.js";
 
 async function sign(value, secret) {
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret),
@@ -19,7 +19,8 @@ export class AIStudioWorkflow extends WorkflowEntrypoint {
     if (!/^\d{1,20}$/.test(ownerId)) throw new Error("Workflow не получил владельца задачи.");
     const jobId = event.instanceId;
     return step.do("Выполнение команды AI Studio", {
-      retries: { limit: 0, delay: "1 second" }
+      retries: { limit: 0, delay: "1 second" },
+      timeout: WORKFLOW_STEP_TIMEOUT
     }, async () => {
       const timestamp = Date.now();
       const signedPayload = JSON.stringify({ task, teamSettings, ownerId });
