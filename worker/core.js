@@ -279,6 +279,10 @@ export function isWorkersAITimeoutError(error) {
   );
 }
 
+export function shouldFallbackQwenToNorth(error, { northEnabled = false, apiKeyAvailable = false } = {}) {
+  return northEnabled === true && apiKeyAvailable === true && isWorkersAITimeoutError(error);
+}
+
 export async function runWorkersAIWithRetry(ai, model, input, options = {}) {
   const attempts = Math.max(1, Math.min(4, Number(options.attempts) || 3));
   const wait = typeof options.wait === "function"
@@ -1623,6 +1627,7 @@ function parseJsonObject(value) {
           contextFiles.map(file => "===== " + file.path + " =====\n" + file.content).join("\n\n") +
           "\n\nДерево файлов:\n" + repoFiles.join("\n");
         const planText = JSON.stringify(plan);
+        let qwenFallbackUsed = false;
         async function askQwen(assignment, feedback = "") {
           executionStage = feedback ? "qwen_repair" : "qwen_implementation";
           const scopedContextText = "Контекст файлов только для чтения (allowedPaths ограничивает запись, а не чтение):\n" + buildAgentContextText(contextFiles);
@@ -1722,23 +1727,50 @@ function parseJsonObject(value) {
           usage.agentResults.push({ agent: "north", status: "success", model: "cohere/north-mini-code:free", transport: "OpenRouter HTTP API", providerStatus: "success", upstreamStatus: response.status, filesReceived: contextFiles.map(file => file.path), filesReceivedCount: contextFiles.length, rawResponse: rawResponse.slice(0, 12000), parsed: { summary: parsed.summary || "", changes: parsed.changes } });
           return parsed;
         }
+        async function executeAssignedImplementation(assignment, feedback = "") {
+          if (assignment.agent !== "qwen" || qwenFallbackUsed) return askNorth(assignment, feedback);
+          try {
+            return await askQwen(assignment, feedback);
+          } catch (error) {
+            if (!shouldFallbackQwenToNorth(error, {
+              northEnabled: teamSettings.agents.north,
+              apiKeyAvailable: Boolean(env.OPENROUTER_API_KEY)
+            })) throw error;
+            qwenFallbackUsed = true;
+            const diagnostic = createAgentFailureDiagnostic({
+              agent: "qwen", model: qwenModel, filesReceived: contextFiles.map(file => file.path), error
+            });
+            diagnostic.transport = "Cloudflare Workers AI binding";
+            diagnostic.providerStatus = "timeout";
+            usage.agentResults.push(diagnostic);
+            await publishTaskProgress("qwen_fallback", "Qwen не ответил — задача передана резервному агенту North", {
+              qwen: "Тайм-аут · резерв включён",
+              north: "Резервная разработка"
+            });
+            return askNorth(assignment, feedback);
+          }
+        }
         await publishTaskProgress("development", "Разработчики выполняют отдельные задания", {
           qwen: teamSettings.agents.qwen ? "Работает" : "Отключён",
           north: teamSettings.agents.north ? (teamSettings.agents.qwen ? "Ожидает независимого ревью" : "Работает") : "Отключён",
           gemini: teamSettings.agents.gemini ? "Передал задания" : "Пропущен"
         });
         const delegationResults = await Promise.all(assignments.map(async assignment => {
-          const result = await (assignment.agent === "qwen" ? askQwen(assignment) : askNorth(assignment)).catch(error => {
+          let result;
+          try {
+            result = await executeAssignedImplementation(assignment);
+          } catch (error) {
             const failure = error instanceof Error ? error : new Error(String(error));
-            failure.agent = assignment.agent;
-            failure.agentStage = assignment.agent + "_implementation";
+            failure.agent = failure.agent || assignment.agent;
+            failure.agentStage = failure.agentStage || failure.agent + "_implementation";
             throw failure;
-          });
-          return { agent: assignment.agent, task: assignment.task, allowedPaths: assignment.allowedPaths, summary: result.summary || "", changes: result.changes };
+          }
+          return { agent: assignment.agent === "qwen" && qwenFallbackUsed ? "north" : assignment.agent,
+            task: assignment.task, allowedPaths: assignment.allowedPaths, summary: result.summary || "", changes: result.changes };
         }));
         await publishTaskProgress("development_complete", "Разработчики передали результаты", {
-          qwen: teamSettings.agents.qwen ? "Завершил разработку" : "Отключён",
-          north: teamSettings.agents.north ? (teamSettings.agents.qwen ? "Ожидает независимого ревью" : "Завершил разработку") : "Отключён"
+          qwen: teamSettings.agents.qwen ? (qwenFallbackUsed ? "Тайм-аут · передал задачу North" : "Завершил разработку") : "Отключён",
+          north: teamSettings.agents.north ? (qwenFallbackUsed || !teamSettings.agents.qwen ? "Завершил резервную разработку" : "Ожидает независимого ревью") : "Отключён"
         });
         const mergedChanges = [];
         const changedPaths = new Set();
@@ -1845,7 +1877,7 @@ function parseJsonObject(value) {
         async function reviewTeam(changes) {
           const reviewTasks = [];
           if (deepReview) reviewTasks.push(reviewChanges(changes).then(result => ({ agent: "gemma", result })).catch(error => ({ agent: "gemma", error })));
-          if (teamSettings.agents.north && teamSettings.agents.qwen && intensity >= 50) reviewTasks.push(reviewWithNorth(changes).then(result => ({ agent: "north", result })).catch(error => ({ agent: "north", error })));
+          if (teamSettings.agents.north && teamSettings.agents.qwen && !qwenFallbackUsed && intensity >= 50) reviewTasks.push(reviewWithNorth(changes).then(result => ({ agent: "north", result })).catch(error => ({ agent: "north", error })));
           if (intensity >= 50) {
             for (const agentKey of ["gemini38", "gemini36", "geminiLite", "gemini31Lite"]) {
               if (teamSettings.agents[agentKey]) reviewTasks.push(reviewWithGeminiModel(agentKey, changes).then(result => ({ agent: agentKey, result })).catch(error => ({ agent: agentKey, error })));
@@ -1883,10 +1915,10 @@ function parseJsonObject(value) {
         }
 
         const hasGeminiReviewers = ["gemini38", "gemini36", "geminiLite", "gemini31Lite"].some(key => teamSettings.agents[key]);
-        const reviewEnabled = deepReview || (teamSettings.agents.north && teamSettings.agents.qwen && intensity >= 50) || (hasGeminiReviewers && intensity >= 50);
+        const reviewEnabled = deepReview || (teamSettings.agents.north && teamSettings.agents.qwen && !qwenFallbackUsed && intensity >= 50) || (hasGeminiReviewers && intensity >= 50);
         await publishTaskProgress("review", reviewEnabled ? "Независимые агенты проверяют изменения" : "Проверка пропущена настройками", {
           gemma: deepReview ? "Проверяет" : "Пропущен",
-          north: teamSettings.agents.north && teamSettings.agents.qwen && intensity >= 50 ? "Проверяет" : teamSettings.agents.north && !teamSettings.agents.qwen ? "Разрабатывает" : "Пропущен",
+          north: teamSettings.agents.north && teamSettings.agents.qwen && !qwenFallbackUsed && intensity >= 50 ? "Проверяет" : teamSettings.agents.north && (!teamSettings.agents.qwen || qwenFallbackUsed) ? "Разрабатывает" : "Пропущен",
           gemini38: teamSettings.agents.gemini38 && intensity >= 50 ? "Проверяет" : "Пропущен",
           gemini36: teamSettings.agents.gemini36 && intensity >= 50 ? "Проверяет" : "Пропущен",
           geminiLite: teamSettings.agents.geminiLite && intensity >= 50 ? "Проверяет" : "Пропущен",
@@ -1896,7 +1928,7 @@ function parseJsonObject(value) {
           : { approved: true, summary: "Ревью пропущено согласно выбранной интенсивности.", issues: [], northReview: null };
         await publishTaskProgress("review_complete", "Проверка изменений завершена", {
           gemma: deepReview ? "Завершил проверку" : "Пропущен",
-          north: teamSettings.agents.north && teamSettings.agents.qwen && intensity >= 50 ? (review.reviewFailures?.some(item => item.agent === "north") ? "Ошибка ревью" : "Завершил проверку") : teamSettings.agents.north && !teamSettings.agents.qwen ? "Разработчик завершил работу" : "Пропущен",
+          north: teamSettings.agents.north && teamSettings.agents.qwen && !qwenFallbackUsed && intensity >= 50 ? (review.reviewFailures?.some(item => item.agent === "north") ? "Ошибка ревью" : "Завершил проверку") : teamSettings.agents.north && (!teamSettings.agents.qwen || qwenFallbackUsed) ? "Разработчик завершил работу" : "Пропущен",
           gemini38: teamSettings.agents.gemini38 && intensity >= 50 ? "Завершил проверку" : "Пропущен",
           gemini36: teamSettings.agents.gemini36 && intensity >= 50 ? "Завершил проверку" : "Пропущен",
           geminiLite: teamSettings.agents.geminiLite && intensity >= 50 ? "Завершил проверку" : "Пропущен",
@@ -1906,8 +1938,8 @@ function parseJsonObject(value) {
         if (!review.approved && allowRepair) {
           repairAttempted = true;
           const repairAssignment = { task: "Исправь изменения согласно замечаниям ревью. Исходная задача: " + task, allowedPaths: implementation.changes.map(change => change.path) };
-          const repairAgent = teamSettings.agents.qwen ? "qwen" : "north";
-          implementation = await (repairAgent === "qwen" ? askQwen(repairAssignment, JSON.stringify(review)) : askNorth(repairAssignment, JSON.stringify(review))).catch(error => {
+          const repairAgent = teamSettings.agents.qwen && !qwenFallbackUsed ? "qwen" : "north";
+          implementation = await executeAssignedImplementation({ ...repairAssignment, agent: repairAgent }, JSON.stringify(review)).catch(error => {
             const failure = error instanceof Error ? error : new Error(String(error));
             failure.agent = repairAgent;
             failure.agentStage = repairAgent + "_repair";
@@ -1923,7 +1955,7 @@ function parseJsonObject(value) {
 
         executionStage = "github_save";
         await publishTaskProgress("github_save", "Сохранение проверенных изменений в GitHub", {
-          qwen: teamSettings.agents.qwen ? "Результат принят" : "Отключён",
+          qwen: teamSettings.agents.qwen ? (qwenFallbackUsed ? "Тайм-аут · резерв North" : "Результат принят") : "Отключён",
           north: teamSettings.agents.north ? "Результат принят" : "Отключён"
         });
         const branch = "ai-studio/task-" + Date.now().toString(36);
@@ -1974,7 +2006,8 @@ function parseJsonObject(value) {
           qwenModel, gemmaModel, branch, filesChanged: changed, agentsUsed: usage.agents,
           usage: { requests: usage.requests, neurons: null, agentResults: usage.agentResults },
           reviewers: review.reviewers || [],
-          qwenReview: teamSettings.agents.qwen ? "Изменения подготовлены Qwen." : "Изменения подготовлены Cohere North Mini Code.",
+          fallback: qwenFallbackUsed ? { from: "qwen", to: "north", reason: "Cloudflare Workers AI timeout (3046)" } : null,
+          qwenReview: qwenFallbackUsed ? "Qwen завершился тайм-аутом; реализацию выполнила Cohere North Mini Code." : teamSettings.agents.qwen ? "Изменения подготовлены Qwen." : "Изменения подготовлены Cohere North Mini Code.",
           gemmaReview: deepReview ? (review.summary || (review.issues.length ? review.issues.join("\n") : "Изменения одобрены.")) : "Ревью пропущено согласно интенсивности.",
           reviewIssues: review.issues, northReview: review.northReview, repairAttempted });
       } catch (error) {
