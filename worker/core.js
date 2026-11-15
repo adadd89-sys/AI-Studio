@@ -1219,7 +1219,38 @@ export default {
       const qwenModel = env.QWEN_MODEL || "@cf/qwen/qwen3.8-27b";
       const gemmaModel = env.GEMMA_MODEL || "@cf/google/gemma-4-26b-a4b-it";
 
-      function parseJsonObject(value) {
+      export function extractQwenResponseText(result) {
+  const message = result?.choices?.[0]?.message;
+  // OpenAI-compatible gateways may include a top-level response/metadata field
+  // alongside the actual assistant message. The generated content is authoritative.
+  const candidates = [
+    message?.content,
+    result?.choices?.[0]?.text,
+    message?.tool_calls?.[0]?.function?.arguments,
+    message?.function_call?.arguments,
+    message?.reasoning_content,
+    message?.reasoning,
+    result?.choices?.[0]?.delta?.content,
+    result?.choices?.[0]?.delta?.reasoning_content,
+    result?.response,
+    result?.generated_text,
+    result?.output_text,
+    result?.output,
+    result?.result?.response,
+    result?.result?.generated_text
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+    if (Array.isArray(candidate)) {
+      const joined = candidate.map(part => typeof part === "string" ? part : part?.text || part?.content || "").join("").trim();
+      if (joined) return joined;
+    }
+    if (candidate && typeof candidate === "object" && typeof candidate.text === "string" && candidate.text.trim()) return candidate.text.trim();
+  }
+  return "";
+}
+
+function parseJsonObject(value) {
         if (typeof value !== "string") return null;
         let cleaned = value.trim().replace(/^\x60{3}(?:json)?\s*/i, "").replace(/\s*\x60{3}$/i, "").trim();
         const tryParse = text => {
@@ -1253,31 +1284,7 @@ export default {
         return null;
       }
       function modelText(result) {
-        const message = result?.choices?.[0]?.message;
-        // Workers AI/Qwen may return the generated answer in reasoning_content
-        // while message.content is null or empty. Prefer normal answer fields first.
-        const candidates = [
-          result?.response,
-          message?.content,
-          result?.choices?.[0]?.text,
-          message?.reasoning_content,
-          message?.reasoning,
-          result?.choices?.[0]?.delta?.content,
-          result?.choices?.[0]?.delta?.reasoning_content,
-          result?.generated_text,
-          result?.output_text,
-          result?.output,
-          result?.result?.response,
-          result?.result?.generated_text
-        ];
-        for (const candidate of candidates) {
-          if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
-          if (Array.isArray(candidate)) {
-            const joined = candidate.map(part => typeof part === "string" ? part : part?.text || "").join("").trim();
-            if (joined) return joined;
-          }
-        }
-        return "";
+        return extractQwenResponseText(result);
       }
       function normalizeQwenPayload(parsed) {
         let value = parsed;
