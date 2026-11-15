@@ -133,6 +133,12 @@ describe("Gemini developer delegation", () => {
       /недопустимый путь файла/
     );
   });
+  it("does not create an unscoped fallback when repository paths are known but no safe path is available", () => {
+    assert.throws(
+      () => normalizeAgentAssignments([], ["qwen"], "Build the feature", [], ["worker/core.js"]),
+      /разрешённые файлы/
+    );
+  });
 });
 
 describe("AI Studio Worker", () => {
