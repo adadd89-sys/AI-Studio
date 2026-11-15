@@ -50,9 +50,8 @@ export function normalizeAgentAssignments(rawAssignments, availableDevelopers, f
       const paths = [...new Set(Array.isArray(fallbackPaths) ? fallbackPaths : [])];
       if ((Array.isArray(knownPaths) && knownPaths.length > 0 && paths.length === 0) ||
           paths.length > 6 || paths.some(path => typeof path !== "string" || !validRepoPath(path) ||
-          !(path === "index.html" || path.startsWith("src/") || path.startsWith("public/") || path.startsWith("worker/")) ||
-          (Array.isArray(knownPaths) && knownPaths.length > 0 && !knownPaths.includes(path)) ||
-          path.split("/").some(part => part.startsWith(".")) || path.includes("node_modules") || path.includes("dist/"))) {
+          !isDeveloperWritablePath(path) ||
+           (Array.isArray(knownPaths) && knownPaths.length > 0 && !knownPaths.includes(path)))) {
         throw new Error("Не удалось безопасно определить разрешённые файлы для резервного задания.");
       }
       return [{ agent: availableDevelopers[0], task: fallbackTask, allowedPaths: paths }];
@@ -77,8 +76,7 @@ export function normalizeAgentAssignments(rawAssignments, availableDevelopers, f
     }
     for (const path of paths) {
       if (typeof path !== "string" || !validRepoPath(path) ||
-          !(path === "index.html" || path.startsWith("src/") || path.startsWith("public/") || path.startsWith("worker/")) ||
-          path.split("/").some(part => part.startsWith(".")) || path.includes("node_modules") || path.includes("dist/") ||
+          !isDeveloperWritablePath(path) ||
           (Array.isArray(knownPaths) && knownPaths.length > 0 && !knownPaths.includes(path))) {
         throw new Error("Gemini назначил недопустимый путь файла для " + agent + ": " + String(path));
       }
@@ -283,6 +281,13 @@ function validRepoPath(path) {
   return typeof path === "string" && path.length > 0 && path.length <= 500 &&
     !path.startsWith("/") && !path.includes("\\") &&
     path.split("/").every(part => part && part !== "." && part !== "..");
+}
+
+export function isDeveloperWritablePath(path) {
+  return validRepoPath(path) &&
+    (path === "index.html" || path.startsWith("src/") || path.startsWith("public/") || path.startsWith("worker/")) &&
+    !path.split("/").some(part => part.startsWith(".")) &&
+    !path.includes("node_modules") && !path.includes("dist/");
 }
 
 function validAiBranch(branch) {
@@ -826,6 +831,7 @@ export default {
       const messages = [...history, { role: "user", content: message }];
       try {
         let reply = "";
+        let usedModel = null;
         let githubState = { createdBranches: new Set(), writtenFiles: new Set(), pullRequest: null };
         if (agent.startsWith("gemini")) {
           if (!env.GEMINI_API_KEY) return json({ error: "Gemini включён, но GEMINI_API_KEY не настроен." }, 503);
@@ -920,15 +926,19 @@ export default {
               throw Object.assign(new Error(errorPayload?.error?.message || "Резервная модель Gemini вернула HTTP " + finalResponse.status), { status: finalResponse.status });
             }
             const finalPayload = await finalResponse.json();
+            activeModel = finalModel;
             reply = (finalPayload?.candidates?.[0]?.content?.parts || []).map(part => part.text || "").join("").trim();
           }
+          usedModel = activeModel;
         } else if (agent === "qwen" || agent === "gemma") {
           if (!env.AI) return json({ error: "Cloudflare Workers AI не настроен." }, 503);
           const model = agent === "qwen" ? (env.QWEN_MODEL || "@cf/qwen/qwen3.8-27b") : (env.GEMMA_MODEL || "@cf/google/gemma-4-26b-a4b-it");
+          usedModel = model;
           const result = await env.AI.run(model, { messages: [{ role: "system", content: "Ты — собеседник AI Studio. Отвечай естественно, по-русски, кратко и по существу. Не утверждай, что изменил файлы или выполнил действия в GitHub: GitHub-инструменты в этом режиме доступны только Gemini." }, ...messages], max_completion_tokens: scaledTokenBudget(intensity, 2048, 8192), temperature: 0.5 });
           reply = result?.response || result?.choices?.[0]?.message?.content || result?.choices?.[0]?.message?.reasoning_content || "";
         } else {
           if (!env.OPENROUTER_API_KEY) return json({ error: "Cohere North Mini Code включён, но OPENROUTER_API_KEY не настроен." }, 503);
+          usedModel = "cohere/north-mini-code:free";
           const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
             method: "POST", headers: { "content-type": "application/json", "authorization": "Bearer " + env.OPENROUTER_API_KEY, "http-referer": "https://ai-studio.sergey-adadd89.workers.dev", "x-title": "AI Studio" },
             body: JSON.stringify({ model: "cohere/north-mini-code:free", max_tokens: scaledTokenBudget(intensity, 2048, 8192), messages: [{ role: "system", content: "Ты — собеседник AI Studio. Отвечай по-русски. В этом режиме инструменты GitHub доступны только Gemini. Не утверждай, что самостоятельно менял файлы или создавал PR." }, ...messages] })
@@ -1019,9 +1029,10 @@ export default {
           }
         }
 
-        const agentLabel = GEMINI_AGENT_LABELS[agent] || (agent === "qwen" ? "Qwen" : agent === "gemma" ? "Gemma" : "Cohere North");
+        const actualGeminiKey = Object.keys(GEMINI_AGENT_MODELS).find(key => GEMINI_AGENT_MODELS[key] === usedModel);
+        const agentLabel = actualGeminiKey ? GEMINI_AGENT_LABELS[actualGeminiKey] : (agent === "qwen" ? "Qwen" : agent === "gemma" ? "Gemma" : "Cohere North");
         const agentsUsed = [...new Set([agent, ...consultations.map(item => item.key)])];
-        return json({ ok: true, reply: reply.trim(), agent, agentLabel, agentsUsed, teamMode: needsTeamConsultation ? "collaborative" : "lead_only", github: githubState.pullRequest, filesChanged: [...githubState.writtenFiles], usage: { requests: 1 + consultationRequests, neurons: null }, consultationFailures: consultTasks.length - consultations.length });
+        return json({ ok: true, reply: reply.trim(), agent, agentLabel, model: usedModel, agentsUsed, teamMode: needsTeamConsultation ? "collaborative" : "lead_only", github: githubState.pullRequest, filesChanged: [...githubState.writtenFiles], usage: { requests: 1 + consultationRequests, neurons: null }, consultationFailures: consultTasks.length - consultations.length });
       } catch (error) {
         // If the selected Gemini model chain is unavailable, hand the same request
         // to the next enabled provider instead of leaving the user without an answer.
@@ -1306,6 +1317,8 @@ export default {
         const mainRef = await githubRequest(env, "/repos/" + GITHUB_REPO + "/git/ref/heads/main");
         const tree = await githubRequest(env, "/repos/" + GITHUB_REPO + "/git/trees/" + mainRef.object.sha + "?recursive=1");
         const repoFiles = (tree.tree || []).filter(item => item.type === "blob").map(item => item.path).slice(0, 120);
+        const assignableRepoFiles = repoFiles.filter(isDeveloperWritablePath);
+        if (!assignableRepoFiles.length) throw new Error("В репозитории не найдено файлов, доступных разработчикам для изменения.");
         const backendTask = /worker|api|сервер|backend|бекенд|авторизац|github|cloudflare|endpoint|маршрут/i.test(task);
         const frontendTask = /интерфейс|компонент|страниц|кнопк|дизайн|стил|верстк|react|jsx|css|frontend|фронтенд|teamstatus/i.test(task);
         const contextPaths = backendTask
@@ -1334,7 +1347,7 @@ export default {
           "Если включены Qwen и North, разложи работу на независимые подзадачи и назначь их обоим; если включён только один разработчик — назначь ему всю работу. " +
           "Каждая подзадача должна иметь конкретную цель и allowedPaths — точный список файлов, которые разрешено менять. Не назначай Gemma разработчиком: она выполняет независимое ревью. " +
           "Не допускай пересечения allowedPaths между исполнителями. allowedPaths должны содержать только точные пути существующих файлов из дерева ниже; не выдумывай пути и не используй каталоги. " +
-          "Доступные файлы репозитория (выбери только необходимые, максимум 6 на исполнителя):\n" + repoFiles.join("\n") +
+          "Доступные для изменения файлы (выбирай только точные пути из списка, максимум 6 на исполнителя; README.md, package.json, lock-файлы и конфигурация не разрешены):\n" + assignableRepoFiles.join("\n") +
           "\nЕсли данных достаточно, questions должен быть пустым массивом. Не утверждай, что работа уже выполнена. Задача пользователя: " + task
         ) : { data: { summary: "План сформирован без Gemini в экономном режиме", steps: ["Изучить затронутые файлы", "Подготовить изменения", "Проверить результат"], acceptanceCriteria: [], risks: [], questions: [] }, model: "Локальный план", fallbackUsed: false };
         let plan = planResult.data;
@@ -1367,8 +1380,9 @@ export default {
             "Ты исправляешь только распределение задач для команды разработки AI Studio. " +
             "Верни только JSON строго вида {\"assignments\":[{\"agent\":\"qwen\",\"task\":\"конкретное отдельное ТЗ\",\"allowedPaths\":[\"worker/core.js\"]}]}. " +
             "Обязательные исполнители: " + JSON.stringify(availableDevelopers) + ". " +
-            "Исходная задача пользователя: " + task + ". План: " + JSON.stringify(plan) + ". " +
-            "Доступные существующие файлы (разрешено выбирать только точные пути из этого списка):\n" + repoFiles.join("\n") + ". " +
+            "Исходная задача пользователя: " + task + ". План без отклонённых назначений: " + JSON.stringify({ summary: plan.summary, steps: plan.steps, acceptanceCriteria: plan.acceptanceCriteria, risks: plan.risks }) + ". " +
+            "Предыдущая ошибка проверки: " + assignmentError.message + ". Обязательно исправь её и не повторяй отклонённые пути. " +
+            "Доступные для изменения файлы (разрешено выбирать только точные пути из этого списка; README.md, package.json, lock-файлы и конфигурация не разрешены):\n" + assignableRepoFiles.join("\n") + ". " +
             "Назначь ровно по одному заданию каждому исполнителю; task обязателен, конкретен и не пуст; allowedPaths — непустой массив существующих файлов, максимум 6 на исполнителя. " +
             "Пути не должны пересекаться между исполнителями. Не добавляй иных полей и не возвращай пояснения."
           );
@@ -1421,9 +1435,7 @@ export default {
           if (parsed.changes.length > 6) throw new Error("Qwen предложил изменить больше 6 файлов.");
           for (const change of parsed.changes) {
             if (!change || typeof change.path !== "string" || typeof change.content !== "string") throw new Error("Qwen вернул некорректное описание файла.");
-            const allowed = change.path === "index.html" || change.path.startsWith("src/") ||
-              change.path.startsWith("public/") || change.path.startsWith("worker/");
-            if (!allowed || (Array.isArray(assignment.allowedPaths) && assignment.allowedPaths.length && !assignment.allowedPaths.includes(change.path)) || !validRepoPath(change.path) || change.path.split("/").some(part => part.startsWith(".")) ||
+            if (!isDeveloperWritablePath(change.path) || (Array.isArray(assignment.allowedPaths) && assignment.allowedPaths.length && !assignment.allowedPaths.includes(change.path)) || !validRepoPath(change.path) || change.path.split("/").some(part => part.startsWith(".")) ||
                 change.path.includes("node_modules") || change.path.includes("dist/")) {
               throw new Error("Запрошен недопустимый путь файла: " + change.path);
             }
