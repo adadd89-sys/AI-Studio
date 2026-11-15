@@ -57,6 +57,22 @@ export function buildAgentContextText(contextFiles) {
     .join("\n\n");
 }
 
+export function createAgentFailureDiagnostic({ agent, model, filesReceived = [], error, upstreamStatus = null }) {
+  const message = String(error?.message || error || "Неизвестная ошибка агента.")
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]")
+    .replace(/([?&]key=)[^&\s]+/gi, "$1[REDACTED]")
+    .replace(/(["']?(?:api[_-]?key|authorization|token)["']?\s*:\s*["'])[^"']+/gi, "$1[REDACTED]")
+    .slice(0, 1500);
+  return {
+    agent,
+    status: "failed",
+    model,
+    filesReceived: Array.isArray(filesReceived) ? filesReceived.filter(path => typeof path === "string") : [],
+    error: message,
+    upstreamStatus: Number.isInteger(upstreamStatus) ? upstreamStatus : null
+  };
+}
+
 export function parseCohereChangesResponse(payload) {
   const raw = typeof payload === "string" ? payload : extractCohereResponseText(payload);
   if (!raw) return null;
@@ -1912,13 +1928,26 @@ function parseJsonObject(value) {
           gemmaReview: deepReview ? (review.summary || (review.issues.length ? review.issues.join("\n") : "Изменения одобрены.")) : "Ревью пропущено согласно интенсивности.",
           reviewIssues: review.issues, northReview: review.northReview, repairAttempted });
       } catch (error) {
+        const failedAgent = executionStage?.startsWith("qwen_") ? "qwen"
+          : (executionStage?.startsWith("north_") ? "north" : null);
+        if (failedAgent) {
+          usage.agentResults.push(createAgentFailureDiagnostic({
+            agent: failedAgent,
+            model: failedAgent === "qwen" ? qwenModel : "cohere/north-mini-code:free",
+            filesReceived: contextFiles.map(file => file.path),
+            error,
+            upstreamStatus: error?.status
+          }));
+        }
         await publishTaskProgress("failed", "Ошибка на этапе: " + (executionStage || "выполнение"), {
           gemini: teamSettings.agents.gemini ? "Ошибка или прервано" : "Пропущен",
-          qwen: teamSettings.agents.qwen ? "Ошибка или прервано" : "Отключён",
-          north: teamSettings.agents.north ? "Ошибка или прервано" : "Отключён"
+          qwen: teamSettings.agents.qwen ? (failedAgent === "qwen" ? "Ошибка или прервано" : usage.agents.includes("qwen") ? "Завершил" : "Пропущен") : "Отключён",
+          north: teamSettings.agents.north ? (failedAgent === "north" ? "Ошибка или прервано" : usage.agents.includes("north") ? "Завершил" : "Пропущен") : "Отключён"
         });
         return json({
           error: error?.message || "Не удалось выполнить задачу командой ИИ.",
+          agentsUsed: usage.agents,
+          usage: { requests: usage.requests, neurons: null, agentResults: usage.agentResults },
           stage: executionStage,
           stageLabel: ({
             gemini_plan: "Планирование Gemini",

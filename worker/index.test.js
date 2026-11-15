@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import worker, { WORKFLOW_STEP_TIMEOUT, assertWorkflowExecutionSucceeded, finalizeWorkflowAgentStatuses, extractCohereResponseText, extractQwenResponseText, parseQwenChangesResponse, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isDeveloperWritablePath, normalizeAgentAssignments, normalizeGeminiPlan, normalizeWorkflowTeamSettings, parseCohereChangesResponse, normalizeCreatedPullRequest, buildAgentContextText, applyCohereTextEdits, isWorkersAITimeoutError, runWorkersAIWithRetry } from "./core.js";
+import worker, { WORKFLOW_STEP_TIMEOUT, assertWorkflowExecutionSucceeded, finalizeWorkflowAgentStatuses, extractCohereResponseText, extractQwenResponseText, parseQwenChangesResponse, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isDeveloperWritablePath, normalizeAgentAssignments, normalizeGeminiPlan, normalizeWorkflowTeamSettings, parseCohereChangesResponse, normalizeCreatedPullRequest, buildAgentContextText, createAgentFailureDiagnostic, applyCohereTextEdits, isWorkersAITimeoutError, runWorkersAIWithRetry } from "./core.js";
 
 const env = {
   APP_PASSWORD: "correct-horse",
@@ -1580,5 +1580,39 @@ describe("AI Studio Worker", () => {
     assert.equal(hasTaskSnapshotChanged(queued, running), true);
     assert.equal(hasTaskSnapshotChanged(running, { ...running, result: { branch: "task-1" } }), true);
   });
+
+
+describe("Agent failure diagnostics", () => {
+  it("records provider failures, context files, and upstream HTTP status without secrets", () => {
+    const result = createAgentFailureDiagnostic({
+      agent: "north",
+      model: "cohere/north-mini-code:free",
+      filesReceived: ["worker/core.js", "worker/index.test.js"],
+      error: new Error("OpenRouter HTTP 429 — Bearer sk-secret-token; key=private-key"),
+      upstreamStatus: 429
+    });
+    assert.deepEqual(result, {
+      agent: "north",
+      status: "failed",
+      model: "cohere/north-mini-code:free",
+      filesReceived: ["worker/core.js", "worker/index.test.js"],
+      error: "OpenRouter HTTP 429 — Bearer [REDACTED]; key=[REDACTED]",
+      upstreamStatus: 429
+    });
+  });
+
+  it("bounds diagnostic messages and safely handles missing error details", () => {
+    const result = createAgentFailureDiagnostic({
+      agent: "qwen",
+      model: "@cf/qwen/qwen3.8-27b",
+      filesReceived: null,
+      error: "x".repeat(2000)
+    });
+    assert.equal(result.status, "failed");
+    assert.equal(result.error.length, 1500);
+    assert.deepEqual(result.filesReceived, []);
+    assert.equal(result.upstreamStatus, null);
+  });
+});
 
 });
