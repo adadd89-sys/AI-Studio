@@ -99,6 +99,20 @@ describe("Gemini developer delegation", () => {
     ]);
   });
 
+  it("rejects an assignment missing task text or allowed paths", () => {
+    assert.throws(
+      () => normalizeAgentAssignments([
+        { agent: "qwen", task: "", allowedPaths: ["worker/core.js"] }
+      ], ["qwen"], "Build the feature"),
+      /нужны текст задания и разрешённые файлы/
+    );
+    assert.throws(
+      () => normalizeAgentAssignments([
+        { agent: "qwen", task: "Implement backend", allowedPaths: [] }
+      ], ["qwen"], "Build the feature"),
+      /нужны текст задания и разрешённые файлы/
+    );
+  });
   it("rejects overlapping file ownership between developers", () => {
     assert.throws(() => normalizeAgentAssignments([
       { agent: "qwen", task: "Backend", allowedPaths: ["worker/core.js"] },
