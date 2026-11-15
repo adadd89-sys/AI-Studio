@@ -242,6 +242,43 @@ function scaledTokenBudget(intensity, minimum, maximum) {
   return Math.round(minimum + (maximum - minimum) * level / 100);
 }
 
+export function isWorkersAITimeoutError(error) {
+  const candidates = [error, error?.cause, error?.error, error?.details];
+  return candidates.some(item =>
+    item && (
+      Number(item.code) === 3046 ||
+      Number(item.internalCode) === 3046 ||
+      Number(item.httpCode) === 408 ||
+      /(?:AiError:\s*)?Request timeout/i.test(String(item.message || ""))
+    )
+  );
+}
+
+export async function runWorkersAIWithRetry(ai, model, input, options = {}) {
+  const attempts = Math.max(1, Math.min(3, Number(options.attempts) || 2));
+  const wait = typeof options.wait === "function"
+    ? options.wait
+    : milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await ai.run(model, input);
+    } catch (error) {
+      if (!isWorkersAITimeoutError(error) || attempt === attempts) {
+        if (isWorkersAITimeoutError(error)) {
+          throw Object.assign(new Error(
+            "Cloudflare Workers AI: модель " + model +
+            " вернула Request timeout (3046) после " + attempt + " попыток. " +
+            "Сервис модели не успел обработать запрос; это не таймаут интерфейса AI Studio."
+          ), { code: 3046, internalCode: 3046, httpCode: 408, cause: error });
+        }
+        throw error;
+      }
+      await wait(700 * attempt);
+    }
+  }
+  throw new Error("Workers AI retry loop завершился неожиданно.");
+}
+
 async function fetchGeminiWithRetry(url, options, retryOptions = {}) {
   const retryable = new Set([408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524]);
   let lastError;
@@ -1523,7 +1560,7 @@ function parseJsonObject(value) {
           const scopedContextText = "Контекст только разрешённых файлов:\n" + contextFiles.filter(file => (assignment.allowedPaths || []).includes(file.path)).map(file => "===== " + file.path + " =====\n" + file.content).join("\n\n");
           async function requestQwen(instruction) {
             usage.requests++;
-            return env.AI.run(qwenModel, { messages: [{ role: "system", content: developerSystem }, { role: "user", content: instruction }], max_completion_tokens: scaledTokenBudget(intensity, 1800, 6144), reasoning_effort: "low", chat_template_kwargs: { enable_thinking: false }, temperature: 0.1 });
+            return runWorkersAIWithRetry(env.AI, qwenModel, { messages: [{ role: "system", content: developerSystem }, { role: "user", content: instruction }], max_completion_tokens: scaledTokenBudget(intensity, 1800, 6144), reasoning_effort: "low", chat_template_kwargs: { enable_thinking: false }, temperature: 0.1 });
           }
           const instruction = "Задача: " + task + "\nПлан: " + planText + "\n" + scopedContextText + "\nТвоё отдельное ТЗ: " + assignment.task + "\nРазрешённые пути: " + JSON.stringify(assignment.allowedPaths || []) + "\nВерни только JSON-объект с массивом changes. Каждый элемент содержит path и полное content. Без Markdown и пояснений."; 
           let result = await requestQwen(instruction);
@@ -1656,7 +1693,7 @@ function parseJsonObject(value) {
             changes: changes.map(change => ({ path: change.path, reason: change.reason || "", content: change.content.slice(0, 24000) })) });
           usage.requests++;
           if (!usage.agents.includes("gemma")) usage.agents.push("gemma");
-          const result = await env.AI.run(gemmaModel, {
+          const result = await runWorkersAIWithRetry(env.AI, gemmaModel, {
             messages: [
               { role: "system", content: "Ты — Gemma, независимый ревьюер и тестировщик. Критически проверь изменения на соответствие задаче, ошибки, безопасность и поломку архитектуры. " +
                 "Верни только JSON: {\"approved\":true,\"summary\":\"...\",\"issues\":[\"...\"]}. " +
