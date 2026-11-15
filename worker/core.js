@@ -1761,7 +1761,7 @@ function parseJsonObject(value) {
             result = await executeAssignedImplementation(assignment);
           } catch (error) {
             const failure = error instanceof Error ? error : new Error(String(error));
-            failure.agent = failure.agent || assignment.agent;
+            failure.agent = failure.agent || (qwenFallbackUsed && assignment.agent === "qwen" ? "north" : assignment.agent);
             failure.agentStage = failure.agentStage || failure.agent + "_implementation";
             throw failure;
           }
@@ -1786,8 +1786,8 @@ function parseJsonObject(value) {
         if (!implementation.changes.length) {
           await publishTaskProgress("complete", "Задача завершена · изменения файлов не потребовались", {
             gemini: teamSettings.agents.gemini ? "Завершил" : "Пропущен",
-            qwen: teamSettings.agents.qwen ? "Завершил" : "Отключён",
-            north: teamSettings.agents.north ? (teamSettings.agents.qwen ? "Проверка не потребовалась" : "Завершил разработку") : "Отключён"
+            qwen: teamSettings.agents.qwen ? (qwenFallbackUsed ? "Тайм-аут · резерв North" : "Завершил") : "Отключён",
+            north: teamSettings.agents.north ? (qwenFallbackUsed || !teamSettings.agents.qwen ? "Резервная разработка завершена" : "Проверка не потребовалась") : "Отключён"
           });
           return json({ ok: true, task, plan, summary: implementation.summary || plan.summary,
             model: planResult.model, primaryModel, fallbackUsed: planResult.fallbackUsed,
@@ -1941,8 +1941,8 @@ function parseJsonObject(value) {
           const repairAgent = teamSettings.agents.qwen && !qwenFallbackUsed ? "qwen" : "north";
           implementation = await executeAssignedImplementation({ ...repairAssignment, agent: repairAgent }, JSON.stringify(review)).catch(error => {
             const failure = error instanceof Error ? error : new Error(String(error));
-            failure.agent = repairAgent;
-            failure.agentStage = repairAgent + "_repair";
+            failure.agent = qwenFallbackUsed && repairAgent === "qwen" ? "north" : repairAgent;
+            failure.agentStage = failure.agent + "_repair";
             throw failure;
           });
           if (!implementation.changes.length) return json({ error: "Ревью отклонило изменения, а разработчик не предложил исправлений.", review }, 422);
@@ -1998,8 +1998,8 @@ function parseJsonObject(value) {
         } catch (prError) { pullRequestError = prError?.message || "Не удалось открыть Pull Request."; }
         await publishTaskProgress("complete", "Задача завершена · результаты сохранены", {
           gemini: teamSettings.agents.gemini ? "Завершил" : "Пропущен",
-          qwen: teamSettings.agents.qwen ? "Завершил" : "Отключён",
-          north: teamSettings.agents.north ? (teamSettings.agents.qwen ? (review.reviewFailures?.some(item => item.agent === "north") ? "Ошибка ревью" : "Завершил проверку") : "Завершил разработку") : "Отключён"
+          qwen: teamSettings.agents.qwen ? (qwenFallbackUsed ? "Тайм-аут · резерв North" : "Завершил") : "Отключён",
+          north: teamSettings.agents.north ? (qwenFallbackUsed || !teamSettings.agents.qwen ? "Завершил резервную разработку" : (review.reviewFailures?.some(item => item.agent === "north") ? "Ошибка ревью" : "Завершил проверку")) : "Отключён"
         });
         return json({ ok: true, task, plan, delegation, pullRequest, pullRequestError, summary: implementation.summary || plan.summary,
           model: planResult.model, primaryModel, fallbackUsed: planResult.fallbackUsed,
