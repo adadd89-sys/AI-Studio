@@ -280,7 +280,7 @@ export function isWorkersAITimeoutError(error) {
 }
 
 export async function runWorkersAIWithRetry(ai, model, input, options = {}) {
-  const attempts = Math.max(1, Math.min(3, Number(options.attempts) || 2));
+  const attempts = Math.max(1, Math.min(4, Number(options.attempts) || 3));
   const wait = typeof options.wait === "function"
     ? options.wait
     : milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
@@ -298,7 +298,7 @@ export async function runWorkersAIWithRetry(ai, model, input, options = {}) {
         }
         throw error;
       }
-      await wait(700 * attempt);
+      await wait(2000 * attempt);
     }
   }
   throw new Error("Workers AI retry loop завершился неожиданно.");
