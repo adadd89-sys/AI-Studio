@@ -1482,14 +1482,14 @@ export default {
               ]
             })});
           }
-          let response=await requestNorth(userInstruction+"\\n\\nВерни только JSON-объект. Для CSS/больших файлов НЕ переписывай весь файл: верни changes с точечными edits:[{find,replace}], где find — короткий точный уникальный фрагмент из переданного контекста, replace — его замена. Для небольших файлов можно вернуть полное content. Никакого текста вне JSON.");
+          let response=await requestNorth(userInstruction+"\n\nВерни только JSON-объект. Для CSS/больших файлов НЕ переписывай весь файл: верни changes с точечными edits:[{find,replace}], где find — короткий точный уникальный фрагмент из переданного контекста, replace — его замена. Для небольших файлов можно вернуть полное content. Никакого текста вне JSON.");
           if(!response.ok){const err=await response.text();throw new Error("OpenRouter North Mini Code: HTTP "+response.status+" — "+err.slice(0,300));}
           let payload=await response.json();
           let parsed=parseCohereChangesResponse(payload);
           if(!parsed){
             const raw=extractCohereResponseText(payload);
             const diagnostic=raw.replace(/\s+/g," ").slice(0,350)||"пустой ответ";
-            response=await requestNorth(userInstruction+"\\n\\nФОРМАТНЫЙ ПОВТОР: верни один JSON-объект {\\\"summary\\\":\\\"...\\\",\\\"changes\\\":[{\\\"path\\\":\\\"src/styles.css\\\",\\\"edits\\\":[{\\\"find\\\":\\\"точный фрагмент исходного файла\\\",\\\"replace\\\":\\\"новый фрагмент\\\"}],\\\"reason\\\":\\\"...\\\"}]}. Для больших файлов обязательно edits, не полное содержимое. Только JSON, без объяснений.");
+            response=await requestNorth(userInstruction+"\n\nФОРМАТНЫЙ ПОВТОР: верни один JSON-объект {\\\"summary\\\":\\\"...\\\",\\\"changes\\\":[{\\\"path\\\":\\\"src/styles.css\\\",\\\"edits\\\":[{\\\"find\\\":\\\"точный фрагмент исходного файла\\\",\\\"replace\\\":\\\"новый фрагмент\\\"}],\\\"reason\\\":\\\"...\\\"}]}. Для больших файлов обязательно edits, не полное содержимое. Только JSON, без объяснений.");
             if(!response.ok){const err=await response.text();throw new Error("OpenRouter North Mini Code: HTTP "+response.status+" при исправлении формата — "+err.slice(0,300));}
             payload=await response.json();
             parsed=parseCohereChangesResponse(payload);
@@ -1504,7 +1504,7 @@ export default {
             if(typeof change.content!=="string"&&Array.isArray(change.edits)){
               const source=await githubRequest(env,"/repos/"+GITHUB_REPO+"/contents/"+change.path.split("/").map(encodeURIComponent).join("/")+"?ref=main");
               if(typeof source.content!=="string")throw new Error("Не удалось загрузить исходный файл для patch North: "+change.path);
-              const binary=atob(source.content.replace(/\\s/g,""));
+              const binary=atob(source.content.replace(/\s/g,""));
               const bytes=Uint8Array.from(binary,char=>char.charCodeAt(0));
               const original=new TextDecoder("utf-8",{fatal:false}).decode(bytes);
               change.content=applyCohereTextEdits(original,change.edits);
