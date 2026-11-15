@@ -1600,4 +1600,13 @@ describe("AI Studio Worker", () => {
     const successHandler = source.slice(successStart, successEnd);
     assert.match(successHandler, /setAgentExecutionDetails\(data\.usage\.agentResults\)/);
   });
+  it("records provider transport and real HTTP status for successful agent calls", () => {
+    const core = readFileSync(new URL("./core.js", import.meta.url), "utf8");
+    const app = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
+    assert.match(core, /agent: "qwen", status: "success"[\\s\\S]*?transport: "Cloudflare Workers AI binding"[\\s\\S]*?providerStatus: "success"[\\s\\S]*?upstreamStatus: null/);
+    assert.match(core, /agent: "north", status: "success"[\\s\\S]*?transport: "OpenRouter HTTP API"[\\s\\S]*?providerStatus: "success"[\\s\\S]*?upstreamStatus: response\\.status/);
+    assert.match(app, /HTTP-код провайдера: \{entry\\.upstreamStatus\}/);
+    assert.match(app, /HTTP-код: не предоставляется Workers AI binding API/);
+  });
+
 });
