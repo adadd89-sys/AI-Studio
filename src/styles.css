@@ -962,3 +962,6 @@ button,input,textarea,select { font-family: 'Inter', sans-serif; }
 .process-agent-result>span b{color:#e0e6f2}
 .process-agent-result p{margin:0;color:#c0cad9;font-size:9px;line-height:1.5;overflow-wrap:anywhere}
 .process-agent-result small{color:#818da1;font-size:8px;line-height:1.5;overflow-wrap:anywhere}
+
+/* Clear role labels in the team settings list. */
+.agent-role-setting{color:#a8a3c8!important;font-size:9px!important;line-height:1.4;white-space:normal}
