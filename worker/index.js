@@ -1,4 +1,4 @@
-import worker, { getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isValidSession, normalizeWorkflowTeamSettings } from "./core.js";
+import worker, { finalizeWorkflowAgentStatuses, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isValidSession, normalizeWorkflowTeamSettings } from "./core.js";
 import { AIStudioWorkflow } from "./workflow.js";
 
 export { AIStudioWorkflow };
@@ -212,12 +212,9 @@ export default {
           } else if (state === "complete" && taskRecord.state !== "complete" && taskRecord.stage !== "complete") {
             events.push({ id: Date.now() + "-workflow-complete", at: Date.now(), stage: "complete", label: "Workflow завершён", agents: [] });
           }
-          const agents = { ...(taskRecord.agents || {}) };
-          if (state === "complete" || state === "failed") {
-            for (const [key, value] of Object.entries(agents)) {
-              if (value !== "Отключён" && value !== "Пропущен") agents[key] = state === "complete" ? "Завершил" : "Ошибка или прервано";
-            }
-          }
+          const agents = state === "complete" || state === "failed"
+            ? finalizeWorkflowAgentStatuses(taskRecord.agents || {}, state, outputData?.agentsUsed)
+            : { ...(taskRecord.agents || {}) };
           const updated = {
             ...taskRecord,
             agents,
