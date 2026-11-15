@@ -950,3 +950,12 @@ button,input,textarea,select { font-family: 'Inter', sans-serif; }
   .agent-card { transition: none; }
   .agent-card:hover { transform: none; }
 }
+
+
+.process-agent-results{display:grid;gap:8px;padding:10px;border:1px solid #303747;border-radius:9px;background:#111620}
+.process-agent-results>strong{font-size:9px;color:#d7deeb}
+.process-agent-result{display:grid;gap:4px;padding-top:7px;border-top:1px solid #293141}
+.process-agent-result>span{font-size:9px;color:#aeb9cb;overflow-wrap:anywhere}
+.process-agent-result>span b{color:#e0e6f2}
+.process-agent-result p{margin:0;color:#c0cad9;font-size:9px;line-height:1.5;overflow-wrap:anywhere}
+.process-agent-result small{color:#818da1;font-size:8px;line-height:1.5;overflow-wrap:anywhere}
