@@ -1411,6 +1411,8 @@ describe("AI Studio Worker", () => {
     });
     assert.deepEqual(stringSteps.steps, ["Изучи файлы; внеси изменения; проверь сборку"]);
     assert.equal(normalizeGeminiPlan({ message: "Не план" }), null);
+    assert.equal(normalizeGeminiPlan(null), null);
+    assert.equal(normalizeGeminiPlan(undefined), null);
   });
 
   it("marks only agents listed in successful workflow output as completed", () => {
