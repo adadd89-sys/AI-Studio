@@ -68,6 +68,7 @@ export function createAgentFailureDiagnostic({ agent, model, filesReceived = [],
     status: "failed",
     model,
     filesReceived: Array.isArray(filesReceived) ? filesReceived.filter(path => typeof path === "string") : [],
+    filesReceivedCount: Array.isArray(filesReceived) ? filesReceived.filter(path => typeof path === "string").length : 0,
     error: message,
     upstreamStatus: Number.isInteger(upstreamStatus) ? upstreamStatus : null
   };
@@ -1529,7 +1530,7 @@ function parseJsonObject(value) {
         const backendTask = /worker|api|сервер|backend|бекенд|авторизац|github|cloudflare|endpoint|маршрут|cohere|north|парсер|парсинг/i.test(task);
         const frontendTask = /интерфейс|компонент|страниц|кнопк|дизайн|стил|верстк|react|jsx|css|frontend|фронтенд|teamstatus/i.test(task);
         const contextPaths = backendTask
-          ? ["worker/core.js", "worker/index.js", "worker/index.test.js", "src/App.jsx"]
+          ? ["worker/core.js", "worker/workflow.js", "worker/index.js", "worker/index.test.js", "src/App.jsx"]
           : frontendTask
             ? ["src/App.jsx", "src/styles.css"]
             : ["src/App.jsx", "src/styles.css", "worker/index.js"];
@@ -1551,7 +1552,7 @@ function parseJsonObject(value) {
         const planResult = teamSettings.agents.gemini ? await callGemini(
           "Ты — руководитель команды разработки AI Studio. Проанализируй задачу и составь конкретный исполнимый план для изменения текущего репозитория AI Studio. " +
           "Верни только JSON: {\"summary\":\"...\",\"steps\":[\"...\"],\"acceptanceCriteria\":[\"...\"],\"risks\":[\"...\"],\"questions\":[],\"assignments\":[{\"agent\":\"qwen|north\",\"task\":\"отдельное ТЗ\",\"allowedPaths\":[\"src/...\"]}]}. " +
-          "Если включены Qwen и North, разложи работу на независимые подзадачи и назначь их обоим; если включён только один разработчик — назначь ему всю работу. " +
+          "Qwen — основной разработчик, когда включён. Cohere North в этом случае НЕ получает задание на реализацию: он выступает независимым ревьюером после изменений Qwen. Если Qwen выключен, Cohere North становится единственным разработчиком. Назначай реализацию только одному агенту. " +
           "Каждая подзадача должна иметь конкретную цель и allowedPaths — точный список файлов, которые разрешено менять. Не назначай Gemma разработчиком: она выполняет независимое ревью. " +
           "Не допускай пересечения allowedPaths между исполнителями. allowedPaths должны содержать только точные пути существующих файлов из дерева ниже; не выдумывай пути и не используй каталоги. " +
           "Доступные для изменения файлы (выбирай только точные пути из списка, максимум 6 на исполнителя; README.md, package.json, lock-файлы и конфигурация не разрешены):\n" + assignableRepoFiles.join("\n") +
@@ -1571,9 +1572,8 @@ function parseJsonObject(value) {
           }, 502);
         }
 
-        const availableDevelopers = [];
-        if (teamSettings.agents.qwen) availableDevelopers.push("qwen");
-        if (teamSettings.agents.north) availableDevelopers.push("north");
+        // Only one implementation owner: North reviews Qwen's work instead of competing as a second developer.
+        const availableDevelopers = [teamSettings.agents.qwen ? "qwen" : "north"];
         const fallbackPaths = contextPaths.filter(path => repoFiles.includes(path)).slice(0, 6);
         let assignments;
         try {
@@ -1647,7 +1647,7 @@ function parseJsonObject(value) {
           }
           const rawResponse = modelText(result);
           if (!usage.agents.includes("qwen")) usage.agents.push("qwen");
-          usage.agentResults.push({ agent: "qwen", status: "success", model: qwenModel, transport: "Cloudflare Workers AI binding", providerStatus: "success", upstreamStatus: null, filesReceived: contextFiles.map(file => file.path), rawResponse: rawResponse.slice(0, 12000), parsed: { summary: parsed.summary || "", changes: parsed.changes } });
+          usage.agentResults.push({ agent: "qwen", status: "success", model: qwenModel, transport: "Cloudflare Workers AI binding", providerStatus: "success", upstreamStatus: null, filesReceived: contextFiles.map(file => file.path), filesReceivedCount: contextFiles.length, rawResponse: rawResponse.slice(0, 12000), parsed: { summary: parsed.summary || "", changes: parsed.changes } });
           return parsed;
         }
 
@@ -1719,12 +1719,12 @@ function parseJsonObject(value) {
           }
           const rawResponse = extractCohereResponseText(payload);
           if (!usage.agents.includes("north")) usage.agents.push("north");
-          usage.agentResults.push({ agent: "north", status: "success", model: "cohere/north-mini-code:free", transport: "OpenRouter HTTP API", providerStatus: "success", upstreamStatus: response.status, filesReceived: contextFiles.map(file => file.path), rawResponse: rawResponse.slice(0, 12000), parsed: { summary: parsed.summary || "", changes: parsed.changes } });
+          usage.agentResults.push({ agent: "north", status: "success", model: "cohere/north-mini-code:free", transport: "OpenRouter HTTP API", providerStatus: "success", upstreamStatus: response.status, filesReceived: contextFiles.map(file => file.path), filesReceivedCount: contextFiles.length, rawResponse: rawResponse.slice(0, 12000), parsed: { summary: parsed.summary || "", changes: parsed.changes } });
           return parsed;
         }
         await publishTaskProgress("development", "Разработчики выполняют отдельные задания", {
           qwen: teamSettings.agents.qwen ? "Работает" : "Отключён",
-          north: teamSettings.agents.north ? "Работает" : "Отключён",
+          north: teamSettings.agents.north ? (teamSettings.agents.qwen ? "Ожидает независимого ревью" : "Работает") : "Отключён",
           gemini: teamSettings.agents.gemini ? "Передал задания" : "Пропущен"
         });
         const delegationResults = await Promise.all(assignments.map(async assignment => {
@@ -1737,8 +1737,8 @@ function parseJsonObject(value) {
           return { agent: assignment.agent, task: assignment.task, allowedPaths: assignment.allowedPaths, summary: result.summary || "", changes: result.changes };
         }));
         await publishTaskProgress("development_complete", "Разработчики передали результаты", {
-          qwen: teamSettings.agents.qwen ? "Завершил" : "Отключён",
-          north: teamSettings.agents.north ? "Завершил" : "Отключён"
+          qwen: teamSettings.agents.qwen ? "Завершил разработку" : "Отключён",
+          north: teamSettings.agents.north ? (teamSettings.agents.qwen ? "Ожидает независимого ревью" : "Завершил разработку") : "Отключён"
         });
         const mergedChanges = [];
         const changedPaths = new Set();
@@ -1825,7 +1825,12 @@ function parseJsonObject(value) {
           const payload = await response.json();
           const rawResponse = modelText(payload);
           const parsed = parseJsonObject(rawResponse);
-          if (!parsed || typeof parsed.approved !== "boolean" || !Array.isArray(parsed.issues)) throw new Error("North Mini Code вернула отзыв не в ожидаемом формате.");
+          if (!parsed || typeof parsed.approved !== "boolean" || !Array.isArray(parsed.issues)) {
+            const failure = new Error("North Mini Code вернула отзыв не в ожидаемом JSON-формате.");
+            failure.status = response.status;
+            failure.rawResponse = rawResponse;
+            throw failure;
+          }
           if (!usage.agents.includes("north")) usage.agents.push("north");
           usage.agentResults.push({
             agent: "north", status: "success", model: "cohere/north-mini-code:free",
@@ -1838,21 +1843,41 @@ function parseJsonObject(value) {
 
         async function reviewTeam(changes) {
           const reviewTasks = [];
-          if (deepReview) reviewTasks.push(reviewChanges(changes).then(result => ({ agent: "gemma", result })));
-          if (teamSettings.agents.north && intensity >= 50) reviewTasks.push(reviewWithNorth(changes).then(result => ({ agent: "north", result })));
+          if (deepReview) reviewTasks.push(reviewChanges(changes).then(result => ({ agent: "gemma", result })).catch(error => ({ agent: "gemma", error })));
+          if (teamSettings.agents.north && intensity >= 50) reviewTasks.push(reviewWithNorth(changes).then(result => ({ agent: "north", result })).catch(error => ({ agent: "north", error })));
           if (intensity >= 50) {
             for (const agentKey of ["gemini38", "gemini36", "geminiLite", "gemini31Lite"]) {
-              if (teamSettings.agents[agentKey]) reviewTasks.push(reviewWithGeminiModel(agentKey, changes).then(result => ({ agent: agentKey, result })));
+              if (teamSettings.agents[agentKey]) reviewTasks.push(reviewWithGeminiModel(agentKey, changes).then(result => ({ agent: agentKey, result })).catch(error => ({ agent: agentKey, error })));
             }
           }
-          const reviews = await Promise.all(reviewTasks);
+          const outcomes = await Promise.all(reviewTasks);
+          const reviews = outcomes.filter(item => item.result);
+          const reviewFailures = outcomes.filter(item => item.error);
           const label = item => item.agent === "north" ? "North" : item.agent === "gemma" ? "Gemma" : GEMINI_AGENT_LABELS[item.agent] || item.agent;
+          for (const failure of reviewFailures) {
+            usage.agentResults.push(createAgentFailureDiagnostic({
+              agent: failure.agent,
+              model: failure.agent === "north" ? "cohere/north-mini-code:free" : failure.agent === "gemma" ? gemmaModel : GEMINI_AGENT_MODELS[failure.agent],
+              filesReceived: contextFiles.map(file => file.path),
+              error: failure.error,
+              upstreamStatus: failure.error?.status
+            }));
+            const diagnostic = usage.agentResults.at(-1);
+            diagnostic.transport = failure.agent === "north" ? "OpenRouter HTTP API" : failure.agent === "gemma" ? "Cloudflare Workers AI binding" : "Google Gemini API";
+            if (typeof failure.error?.rawResponse === "string") diagnostic.rawResponse = failure.error.rawResponse.slice(0, 12000);
+          }
+          const northFailure = reviewFailures.find(item => item.agent === "north");
           return {
+            // An unavailable optional reviewer is a warning, not a reason to discard valid implementation work.
             approved: reviews.every(item => item.result.approved),
-            summary: reviews.map(item => label(item) + ": " + (item.result.summary || (item.result.approved ? "Одобрено" : "Есть замечания"))).join(" · ") || "Ревью пропущено согласно выбранной интенсивности.",
+            summary: [
+              ...reviews.map(item => label(item) + ": " + (item.result.summary || (item.result.approved ? "Одобрено" : "Есть замечания"))),
+              ...reviewFailures.map(item => label(item) + ": проверка не выполнена — " + String(item.error?.message || item.error))
+            ].join(" · ") || "Ревью пропущено согласно выбранной интенсивности.",
             issues: reviews.flatMap(item => item.result.issues || []),
-            northReview: reviews.find(item => item.agent === "north")?.result || null,
-            reviewers: reviews.map(item => item.agent)
+            northReview: reviews.find(item => item.agent === "north")?.result || (northFailure ? { approved: null, summary: "Независимое ревью не выполнено: " + String(northFailure.error?.message || northFailure.error), issues: [] } : null),
+            reviewers: reviews.map(item => item.agent),
+            reviewFailures
           };
         }
 
@@ -1870,7 +1895,7 @@ function parseJsonObject(value) {
           : { approved: true, summary: "Ревью пропущено согласно выбранной интенсивности.", issues: [], northReview: null };
         await publishTaskProgress("review_complete", "Проверка изменений завершена", {
           gemma: deepReview ? "Завершил проверку" : "Пропущен",
-          north: teamSettings.agents.north && intensity >= 50 ? "Завершил проверку" : "Пропущен",
+          north: teamSettings.agents.north && intensity >= 50 ? (review.reviewFailures?.some(item => item.agent === "north") ? "Ошибка ревью" : "Завершил проверку") : "Пропущен",
           gemini38: teamSettings.agents.gemini38 && intensity >= 50 ? "Завершил проверку" : "Пропущен",
           gemini36: teamSettings.agents.gemini36 && intensity >= 50 ? "Завершил проверку" : "Пропущен",
           geminiLite: teamSettings.agents.geminiLite && intensity >= 50 ? "Завершил проверку" : "Пропущен",
