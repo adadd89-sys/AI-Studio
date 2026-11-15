@@ -48,7 +48,8 @@ export function normalizeAgentAssignments(rawAssignments, availableDevelopers, f
   if (!Array.isArray(rawAssignments) || rawAssignments.length === 0) {
     if (availableDevelopers.length === 1) {
       const paths = [...new Set(Array.isArray(fallbackPaths) ? fallbackPaths : [])];
-      if (paths.length > 6 || paths.some(path => typeof path !== "string" || !validRepoPath(path) ||
+      if ((Array.isArray(knownPaths) && knownPaths.length > 0 && paths.length === 0) ||
+          paths.length > 6 || paths.some(path => typeof path !== "string" || !validRepoPath(path) ||
           !(path === "index.html" || path.startsWith("src/") || path.startsWith("public/") || path.startsWith("worker/")) ||
           (Array.isArray(knownPaths) && knownPaths.length > 0 && !knownPaths.includes(path)) ||
           path.split("/").some(part => part.startsWith(".")) || path.includes("node_modules") || path.includes("dist/"))) {
@@ -1333,8 +1334,8 @@ export default {
           "Если включены Qwen и North, разложи работу на независимые подзадачи и назначь их обоим; если включён только один разработчик — назначь ему всю работу. " +
           "Каждая подзадача должна иметь конкретную цель и allowedPaths — точный список файлов, которые разрешено менять. Не назначай Gemma разработчиком: она выполняет независимое ревью. " +
           "Не допускай пересечения allowedPaths между исполнителями. allowedPaths должны содержать только точные пути существующих файлов из дерева ниже; не выдумывай пути и не используй каталоги. " +
-          "Доступные файлы репозитория (выбери только необходимые, максимум 6 на исполнителя):\\n" + repoFiles.join("\\n") +
-          "\\nЕсли данных достаточно, questions должен быть пустым массивом. Не утверждай, что работа уже выполнена. Задача пользователя: " + task
+          "Доступные файлы репозитория (выбери только необходимые, максимум 6 на исполнителя):\n" + repoFiles.join("\n") +
+          "\nЕсли данных достаточно, questions должен быть пустым массивом. Не утверждай, что работа уже выполнена. Задача пользователя: " + task
         ) : { data: { summary: "План сформирован без Gemini в экономном режиме", steps: ["Изучить затронутые файлы", "Подготовить изменения", "Проверить результат"], acceptanceCriteria: [], risks: [], questions: [] }, model: "Локальный план", fallbackUsed: false };
         let plan = planResult.data;
         if (typeof plan.summary !== "string" || !Array.isArray(plan.steps) || !plan.steps.length) {
@@ -1357,7 +1358,7 @@ export default {
             "Верни только JSON строго вида {\\"assignments\\":[{\\"agent\\":\\"qwen\\",\\"task\\":\\"конкретное отдельное ТЗ\\",\\"allowedPaths\\":[\\"worker/core.js\\"]}]}. " +
             "Обязательные исполнители: " + JSON.stringify(availableDevelopers) + ". " +
             "Исходная задача пользователя: " + task + ". План: " + JSON.stringify(plan) + ". " +
-            "Доступные существующие файлы (разрешено выбирать только точные пути из этого списка):\\n" + repoFiles.join("\\n") + ". " +
+            "Доступные существующие файлы (разрешено выбирать только точные пути из этого списка):\n" + repoFiles.join("\n") + ". " +
             "Назначь ровно по одному заданию каждому исполнителю; task обязателен, конкретен и не пуст; allowedPaths — непустой массив существующих файлов, максимум 6 на исполнителя. " +
             "Пути не должны пересекаться между исполнителями. Не добавляй иных полей и не возвращай пояснения."
           );
