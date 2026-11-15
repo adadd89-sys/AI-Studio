@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import worker, { assertWorkflowExecutionSucceeded, extractCohereResponseText, extractQwenResponseText, parseQwenChangesResponse, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isDeveloperWritablePath, normalizeAgentAssignments, normalizeGeminiPlan, normalizeWorkflowTeamSettings, parseCohereChangesResponse, applyCohereTextEdits } from "./core.js";
+import worker, { WORKFLOW_STEP_TIMEOUT, assertWorkflowExecutionSucceeded, extractCohereResponseText, extractQwenResponseText, parseQwenChangesResponse, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isDeveloperWritablePath, normalizeAgentAssignments, normalizeGeminiPlan, normalizeWorkflowTeamSettings, parseCohereChangesResponse, applyCohereTextEdits } from "./core.js";
 
 const env = {
   APP_PASSWORD: "correct-horse",
@@ -208,6 +208,10 @@ describe("Gemini developer delegation", () => {
 });
 
 describe("AI Studio Worker", () => {
+  it("uses an explicit 30-minute Workflow step timeout", () => {
+    assert.equal(WORKFLOW_STEP_TIMEOUT, "30 minutes");
+  });
+
   it("marks workflow execution as failed when the internal worker returns an error", () => {
     assert.throws(
       () => assertWorkflowExecutionSucceeded(502, { error: "Qwen вернул пустой ответ." }),

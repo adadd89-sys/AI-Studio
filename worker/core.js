@@ -1,3 +1,4 @@
+export const WORKFLOW_STEP_TIMEOUT = "30 minutes";
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" };
 const SESSION_COOKIE = "ai_studio_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
