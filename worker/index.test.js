@@ -99,6 +99,20 @@ describe("Gemini developer delegation", () => {
     ]);
   });
 
+  it("rejects an assignment missing task text or allowed paths", () => {
+    assert.throws(
+      () => normalizeAgentAssignments([
+        { agent: "qwen", task: "", allowedPaths: ["worker/core.js"] }
+      ], ["qwen"], "Build the feature"),
+      /нужны текст задания и разрешённые файлы/
+    );
+    assert.throws(
+      () => normalizeAgentAssignments([
+        { agent: "qwen", task: "Implement backend", allowedPaths: [] }
+      ], ["qwen"], "Build the feature"),
+      /нужны текст задания и разрешённые файлы/
+    );
+  });
   it("rejects overlapping file ownership between developers", () => {
     assert.throws(() => normalizeAgentAssignments([
       { agent: "qwen", task: "Backend", allowedPaths: ["worker/core.js"] },
@@ -117,6 +131,26 @@ describe("Gemini developer delegation", () => {
     assert.deepEqual(
       normalizeAgentAssignments([], ["qwen"], "Build the feature"),
       [{ agent: "qwen", task: "Build the feature", allowedPaths: [] }]
+    );
+  });
+  it("supplies repository-scoped fallback paths for a single developer", () => {
+    assert.deepEqual(
+      normalizeAgentAssignments([], ["qwen"], "Build the feature", ["worker/core.js"], ["worker/core.js", "src/App.jsx"]),
+      [{ agent: "qwen", task: "Build the feature", allowedPaths: ["worker/core.js"] }]
+    );
+  });
+  it("rejects allowed paths that are not present in the repository tree", () => {
+    assert.throws(
+      () => normalizeAgentAssignments([
+        { agent: "qwen", task: "Implement backend", allowedPaths: ["worker/missing.js"] }
+      ], ["qwen"], "Build the feature", [], ["worker/core.js"]),
+      /недопустимый путь файла/
+    );
+  });
+  it("does not create an unscoped fallback when repository paths are known but no safe path is available", () => {
+    assert.throws(
+      () => normalizeAgentAssignments([], ["qwen"], "Build the feature", [], ["worker/core.js"]),
+      /разрешённые файлы/
     );
   });
 });
@@ -855,25 +889,38 @@ describe("AI Studio Worker", () => {
         if (model === "gemini-4-hydrogen" || model === "gemini-3.8-flash") {
           return new Response(JSON.stringify({ error: { message: "Model overloaded" } }), { status: 503 });
         }
+        const prompt = JSON.parse(options.body).contents?.[0]?.parts?.[0]?.text || "";
+        const responseData = prompt.includes("Ты исправляешь только распределение задач")
+          ? { assignments: [
+              { agent: "qwen", task: "Обнови компонент приложения для экрана настроек", allowedPaths: ["src/App.jsx"] },
+              { agent: "north", task: "Добавь стили для экрана настроек", allowedPaths: ["src/theme.css"] }
+            ] }
+          : {
+              summary: "Добавить экран настроек",
+              steps: ["Создать компонент настроек", "Проверить изменения"],
+              acceptanceCriteria: ["Экран доступен из навигации"],
+              risks: [],
+              questions: [],
+              assignments: [
+                { agent: "qwen", task: "Создай компонент настроек", allowedPaths: ["src/new-screen.jsx"] },
+                { agent: "north", task: "Подготовь отдельный файл стилей", allowedPaths: ["src/missing-theme.css"] }
+              ]
+            };
         return new Response(JSON.stringify({
-          candidates: [{ content: { parts: [{ text: JSON.stringify({
-            summary: "Добавить экран настроек",
-            steps: ["Создать компонент настроек", "Проверить изменения"],
-            acceptanceCriteria: ["Экран доступен из навигации"],
-            risks: [],
-            questions: [],
-            assignments: [
-              { agent: "qwen", task: "Создай компонент настроек", allowedPaths: ["src/new-screen.jsx"] },
-              { agent: "north", task: "Подготовь отдельный файл стилей", allowedPaths: ["src/theme.css"] }
-            ]
-          }) }] } }]
+          candidates: [{ content: { parts: [{ text: JSON.stringify(responseData) }] } }]
         }), { status: 200, headers: { "content-type": "application/json" } });
       }
       if (target.includes("/git/trees/") && target.includes("?recursive=1")) {
-        return new Response(JSON.stringify({ tree: [{ path: "src/App.jsx", type: "blob" }] }), { status: 200 });
+        return new Response(JSON.stringify({ tree: [
+          { path: "src/App.jsx", type: "blob" },
+          { path: "src/theme.css", type: "blob" }
+        ] }), { status: 200 });
       }
       if (target.includes("/contents/src/App.jsx?ref=main")) {
         return new Response(JSON.stringify({ content: btoa("export default function App() { return null; }"), sha: "a".repeat(40) }), { status: 200 });
+      }
+      if (target.includes("/contents/") && target.includes("?ref=ai-studio%2Ftask-")) {
+        return new Response(JSON.stringify({ sha: "d".repeat(40) }), { status: 200 });
       }
       if (target.includes("/git/ref/heads/main")) {
         return new Response(JSON.stringify({ object: { sha: "b".repeat(40) } }), { status: 200 });
@@ -903,7 +950,7 @@ describe("AI Studio Worker", () => {
         if (model === "@cf/qwen/qwen3.8-27b") {
           return { response: JSON.stringify({
             summary: "Подготовлен экран настроек",
-            changes: [{ path: "src/new-screen.jsx", content: "export default function Settings() { return <main>Settings</main>; }", reason: "Добавить экран настроек" }]
+            changes: [{ path: "src/App.jsx", content: "export default function Settings() { return <main>Settings</main>; }", reason: "Добавить экран настроек" }]
           }) };
         }
         if (model === "@cf/google/gemma-4-26b-a4b-it") {
@@ -924,13 +971,14 @@ describe("AI Studio Worker", () => {
       assert.equal(result.model, "gemini-3.6-flash");
       assert.equal(result.primaryModel, "gemini-4-hydrogen");
       assert.equal(result.fallbackUsed, true);
-      assert.deepEqual(requestedGeminiModels, [
+      const expectedFallbackSequence = [
         "gemini-4-hydrogen", "gemini-4-hydrogen", "gemini-4-hydrogen",
         "gemini-3.8-flash", "gemini-3.8-flash", "gemini-3.8-flash",
         "gemini-3.6-flash"
-      ]);
+      ];
+      assert.deepEqual(requestedGeminiModels, [...expectedFallbackSequence, ...expectedFallbackSequence]);
       assert.match(result.branch, /^ai-studio\/task-/);
-      assert.deepEqual(result.filesChanged.map(file => file.path).sort(), ["src/new-screen.jsx", "src/theme.css"]);
+      assert.deepEqual(result.filesChanged.map(file => file.path).sort(), ["src/App.jsx", "src/theme.css"]);
       assert.match(result.gemmaReview, /Gemma: Изменения корректны\./);
       assert.deepEqual(result.delegation.map(item => item.agent).sort(), ["north", "qwen"]);
       assert.equal(result.pullRequest.number, 41);
