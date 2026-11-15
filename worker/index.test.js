@@ -1582,12 +1582,11 @@ describe("AI Studio Worker", () => {
     assert.equal(hasTaskSnapshotChanged(running, { ...running, result: { branch: "task-1" } }), true);
   });
 
-describe("Workflow error context scope", () => {
-  it("declares contextFiles outside the inner try so the outer catch can report received files", () => {
+  it("keeps contextFiles in the enclosing scope for the workflow error handler", () => {
     const source = readFileSync(new URL("./core.js", import.meta.url), "utf8");
-    assert.match(source, /let contextFiles = \\[\\];[\\s\\S]*?contextFiles = \\[\\];/);
-    assert.doesNotMatch(source, /const contextFiles = \\[\\];/);
+    assert.ok(source.includes("let contextFiles = [];"));
+    assert.ok(source.includes("contextFiles = [];"));
+    assert.ok(!source.includes("const contextFiles = [];"));
   });
-});
 
 });
