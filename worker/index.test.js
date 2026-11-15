@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import worker, { WORKFLOW_STEP_TIMEOUT, assertWorkflowExecutionSucceeded, finalizeWorkflowAgentStatuses, extractCohereResponseText, extractQwenResponseText, parseQwenChangesResponse, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isDeveloperWritablePath, normalizeAgentAssignments, normalizeGeminiPlan, normalizeWorkflowTeamSettings, parseCohereChangesResponse, normalizeCreatedPullRequest, buildAgentContextText, applyCohereTextEdits, isWorkersAITimeoutError, runWorkersAIWithRetry } from "./core.js";
 
 const env = {
@@ -1580,5 +1581,13 @@ describe("AI Studio Worker", () => {
     assert.equal(hasTaskSnapshotChanged(queued, running), true);
     assert.equal(hasTaskSnapshotChanged(running, { ...running, result: { branch: "task-1" } }), true);
   });
+
+describe("Workflow error context scope", () => {
+  it("declares contextFiles outside the inner try so the outer catch can report received files", () => {
+    const source = readFileSync(new URL("./core.js", import.meta.url), "utf8");
+    assert.match(source, /let contextFiles = \\[\\];[\\s\\S]*?contextFiles = \\[\\];/);
+    assert.doesNotMatch(source, /const contextFiles = \\[\\];/);
+  });
+});
 
 });
