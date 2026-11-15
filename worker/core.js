@@ -50,9 +50,8 @@ export function normalizeAgentAssignments(rawAssignments, availableDevelopers, f
       const paths = [...new Set(Array.isArray(fallbackPaths) ? fallbackPaths : [])];
       if ((Array.isArray(knownPaths) && knownPaths.length > 0 && paths.length === 0) ||
           paths.length > 6 || paths.some(path => typeof path !== "string" || !validRepoPath(path) ||
-          !(path === "index.html" || path.startsWith("src/") || path.startsWith("public/") || path.startsWith("worker/")) ||
-          (Array.isArray(knownPaths) && knownPaths.length > 0 && !knownPaths.includes(path)) ||
-          path.split("/").some(part => part.startsWith(".")) || path.includes("node_modules") || path.includes("dist/"))) {
+          !isDeveloperWritablePath(path) ||
+           (Array.isArray(knownPaths) && knownPaths.length > 0 && !knownPaths.includes(path)))) {
         throw new Error("Не удалось безопасно определить разрешённые файлы для резервного задания.");
       }
       return [{ agent: availableDevelopers[0], task: fallbackTask, allowedPaths: paths }];
@@ -77,8 +76,7 @@ export function normalizeAgentAssignments(rawAssignments, availableDevelopers, f
     }
     for (const path of paths) {
       if (typeof path !== "string" || !validRepoPath(path) ||
-          !(path === "index.html" || path.startsWith("src/") || path.startsWith("public/") || path.startsWith("worker/")) ||
-          path.split("/").some(part => part.startsWith(".")) || path.includes("node_modules") || path.includes("dist/") ||
+          !isDeveloperWritablePath(path) ||
           (Array.isArray(knownPaths) && knownPaths.length > 0 && !knownPaths.includes(path))) {
         throw new Error("Gemini назначил недопустимый путь файла для " + agent + ": " + String(path));
       }
@@ -283,6 +281,13 @@ function validRepoPath(path) {
   return typeof path === "string" && path.length > 0 && path.length <= 500 &&
     !path.startsWith("/") && !path.includes("\\") &&
     path.split("/").every(part => part && part !== "." && part !== "..");
+}
+
+export function isDeveloperWritablePath(path) {
+  return validRepoPath(path) &&
+    (path === "index.html" || path.startsWith("src/") || path.startsWith("public/") || path.startsWith("worker/")) &&
+    !path.split("/").some(part => part.startsWith(".")) &&
+    !path.includes("node_modules") && !path.includes("dist/");
 }
 
 function validAiBranch(branch) {
@@ -1312,6 +1317,8 @@ export default {
         const mainRef = await githubRequest(env, "/repos/" + GITHUB_REPO + "/git/ref/heads/main");
         const tree = await githubRequest(env, "/repos/" + GITHUB_REPO + "/git/trees/" + mainRef.object.sha + "?recursive=1");
         const repoFiles = (tree.tree || []).filter(item => item.type === "blob").map(item => item.path).slice(0, 120);
+        const assignableRepoFiles = repoFiles.filter(isDeveloperWritablePath);
+        if (!assignableRepoFiles.length) throw new Error("В репозитории не найдено файлов, доступных разработчикам для изменения.");
         const backendTask = /worker|api|сервер|backend|бекенд|авторизац|github|cloudflare|endpoint|маршрут/i.test(task);
         const frontendTask = /интерфейс|компонент|страниц|кнопк|дизайн|стил|верстк|react|jsx|css|frontend|фронтенд|teamstatus/i.test(task);
         const contextPaths = backendTask
@@ -1340,7 +1347,7 @@ export default {
           "Если включены Qwen и North, разложи работу на независимые подзадачи и назначь их обоим; если включён только один разработчик — назначь ему всю работу. " +
           "Каждая подзадача должна иметь конкретную цель и allowedPaths — точный список файлов, которые разрешено менять. Не назначай Gemma разработчиком: она выполняет независимое ревью. " +
           "Не допускай пересечения allowedPaths между исполнителями. allowedPaths должны содержать только точные пути существующих файлов из дерева ниже; не выдумывай пути и не используй каталоги. " +
-          "Доступные файлы репозитория (выбери только необходимые, максимум 6 на исполнителя):\n" + repoFiles.join("\n") +
+          "Доступные для изменения файлы (выбирай только точные пути из списка, максимум 6 на исполнителя; README.md, package.json, lock-файлы и конфигурация не разрешены):\n" + assignableRepoFiles.join("\n") +
           "\nЕсли данных достаточно, questions должен быть пустым массивом. Не утверждай, что работа уже выполнена. Задача пользователя: " + task
         ) : { data: { summary: "План сформирован без Gemini в экономном режиме", steps: ["Изучить затронутые файлы", "Подготовить изменения", "Проверить результат"], acceptanceCriteria: [], risks: [], questions: [] }, model: "Локальный план", fallbackUsed: false };
         let plan = planResult.data;
@@ -1374,7 +1381,7 @@ export default {
             "Верни только JSON строго вида {\"assignments\":[{\"agent\":\"qwen\",\"task\":\"конкретное отдельное ТЗ\",\"allowedPaths\":[\"worker/core.js\"]}]}. " +
             "Обязательные исполнители: " + JSON.stringify(availableDevelopers) + ". " +
             "Исходная задача пользователя: " + task + ". План: " + JSON.stringify(plan) + ". " +
-            "Доступные существующие файлы (разрешено выбирать только точные пути из этого списка):\n" + repoFiles.join("\n") + ". " +
+            "Доступные для изменения файлы (разрешено выбирать только точные пути из этого списка; README.md, package.json, lock-файлы и конфигурация не разрешены):\n" + assignableRepoFiles.join("\n") + ". " +
             "Назначь ровно по одному заданию каждому исполнителю; task обязателен, конкретен и не пуст; allowedPaths — непустой массив существующих файлов, максимум 6 на исполнителя. " +
             "Пути не должны пересекаться между исполнителями. Не добавляй иных полей и не возвращай пояснения."
           );
@@ -1427,9 +1434,7 @@ export default {
           if (parsed.changes.length > 6) throw new Error("Qwen предложил изменить больше 6 файлов.");
           for (const change of parsed.changes) {
             if (!change || typeof change.path !== "string" || typeof change.content !== "string") throw new Error("Qwen вернул некорректное описание файла.");
-            const allowed = change.path === "index.html" || change.path.startsWith("src/") ||
-              change.path.startsWith("public/") || change.path.startsWith("worker/");
-            if (!allowed || (Array.isArray(assignment.allowedPaths) && assignment.allowedPaths.length && !assignment.allowedPaths.includes(change.path)) || !validRepoPath(change.path) || change.path.split("/").some(part => part.startsWith(".")) ||
+            if (!isDeveloperWritablePath(change.path) || (Array.isArray(assignment.allowedPaths) && assignment.allowedPaths.length && !assignment.allowedPaths.includes(change.path)) || !validRepoPath(change.path) || change.path.split("/").some(part => part.startsWith(".")) ||
                 change.path.includes("node_modules") || change.path.includes("dist/")) {
               throw new Error("Запрошен недопустимый путь файла: " + change.path);
             }
