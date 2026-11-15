@@ -65,8 +65,36 @@ export function parseCohereChangesResponse(payload) {
     }
   }
   for(let depth=0;depth<4 && parsed && !Array.isArray(parsed.changes);depth++){
+    const alternatives=parsed.files||parsed.file_changes||parsed.fileChanges||parsed.patches;
+    if(Array.isArray(alternatives)){parsed.changes=alternatives;break;}
     const nested=parsed.result||parsed.data||parsed.output||parsed.response;
     parsed=typeof nested==="string"?parse(nested):nested;
+  }
+  return parsed && Array.isArray(parsed.changes) ? parsed : null;
+}
+
+export function parseQwenChangesResponse(payload) {
+  const raw = typeof payload === "string" ? payload : extractQwenResponseText(payload);
+  if (!raw) return null;
+  const cleaned = raw.trim().replace(/^\x60{3}(?:json)?\s*/i, "").replace(/\s*\x60{3}$/i, "").trim();
+  const parse = value => { try { const item = JSON.parse(value); return item && typeof item === "object" && !Array.isArray(item) ? item : null; } catch { return null; } };
+  let parsed = parse(cleaned);
+  if (!parsed) {
+    for (let start = cleaned.indexOf("{"); start >= 0 && !parsed; start = cleaned.indexOf("{", start + 1)) {
+      let depth = 0, inString = false, escaped = false;
+      for (let i = start; i < cleaned.length; i++) {
+        const ch = cleaned[i];
+        if (inString) { if (escaped) escaped = false; else if (ch === "\\\\") escaped = true; else if (ch === '"') inString = false; continue; }
+        if (ch === '"') inString = true; else if (ch === "{") depth++;
+        else if (ch === "}" && --depth === 0) { parsed = parse(cleaned.slice(start, i + 1)); break; }
+      }
+    }
+  }
+  for (let depth = 0; depth < 4 && parsed && !Array.isArray(parsed.changes); depth++) {
+    const alternatives = parsed.files || parsed.file_changes || parsed.patches;
+    if (Array.isArray(alternatives)) { parsed.changes = alternatives; break; }
+    const nested = parsed.result || parsed.data || parsed.output || parsed.response;
+    parsed = typeof nested === "string" ? parse(nested) : nested;
   }
   return parsed && Array.isArray(parsed.changes) ? parsed : null;
 }
@@ -1481,48 +1509,37 @@ function parseJsonObject(value) {
         const planText = JSON.stringify(plan);
         async function askQwen(assignment, feedback = "") {
           executionStage = feedback ? "qwen_repair" : "qwen_implementation";
-          usage.requests++;
           if (!usage.agents.includes("qwen")) usage.agents.push("qwen");
-          const result = await env.AI.run(qwenModel, {
-            messages: [
-              { role: "system", content: developerSystem },
-              { role: "user", content: "Задача пользователя:\n" + task + "\n\nПлан Gemini:\n" + planText +
-                "\n\n" + contextText + (feedback ? "\n\nЗамечания Gemma:\n" + feedback : "") +
-                "\n\nТвоё отдельное ТЗ от Gemini:\n" + assignment.task + "\nРазрешённые пути: " + JSON.stringify(assignment.allowedPaths || []) + (feedback ? "\n\nЗамечания ревью:\n" + feedback : "") + "\n\nПодготовь законченные изменения только по своему ТЗ. Ответ только JSON." }
-            ],
-            max_completion_tokens: scaledTokenBudget(intensity, 1200, 4096),
-            reasoning_effort: "low",
-            chat_template_kwargs: { enable_thinking: false },
-            temperature: 0.15
-          });
-          const rawText = modelText(result);
-          const parsed = normalizeQwenPayload(parseJsonObject(rawText));
+          const scopedContextText = "Контекст только разрешённых файлов:\n" + contextFiles.filter(file => (assignment.allowedPaths || []).includes(file.path)).map(file => "===== " + file.path + " =====\n" + file.content).join("\n\n");
+          async function requestQwen(instruction) {
+            usage.requests++;
+            return env.AI.run(qwenModel, { messages: [{ role: "system", content: developerSystem }, { role: "user", content: instruction }], max_completion_tokens: scaledTokenBudget(intensity, 1800, 6144), reasoning_effort: "low", chat_template_kwargs: { enable_thinking: false }, temperature: 0.1 });
+          }
+          const instruction = "Задача: " + task + "\nПлан: " + planText + "\n" + scopedContextText + "\nТвоё отдельное ТЗ: " + assignment.task + "\nРазрешённые пути: " + JSON.stringify(assignment.allowedPaths || []) + "\nВерни только JSON-объект с массивом changes. Каждый элемент содержит path и полное content. Без Markdown и пояснений."; 
+          let result = await requestQwen(instruction);
+          let parsed = parseQwenChangesResponse(result);
           if (!parsed) {
-            const preview = rawText.replace(/\s+/g, " ").slice(0, 500);
-            const shape = result && typeof result === "object" ? Object.keys(result).join(", ") : typeof result;
-            throw new Error("Qwen вернул ответ, который не удалось разобрать как JSON с массивом changes. " +
-              "Поля ответа: " + (shape || "нет") + "; длина текста: " + rawText.length +
-              "; фрагмент: " + (preview || "пустой ответ"));
+            const firstRaw = modelText(result).replace(/\s+/g, " ").slice(0, 350) || "пустой ответ";
+            result = await requestQwen("ФОРМАТНЫЙ ПОВТОР. Верни только JSON с полями summary и changes: " + JSON.stringify({ summary: "Изменения", changes: [{ path: (assignment.allowedPaths || [])[0] || "src/App.jsx", content: "ПОЛНОЕ СОДЕРЖИМОЕ ФАЙЛА" }] }) + ". Используй только разрешённые пути " + JSON.stringify(assignment.allowedPaths || []) + ". Задача: " + task + ". ТЗ: " + assignment.task + ". Контекст: " + scopedContextText + ". Предыдущий ответ: " + firstRaw);
+            parsed = parseQwenChangesResponse(result);
+            if (!parsed) { const retryRaw = modelText(result).replace(/\s+/g, " ").slice(0, 350) || "пустой ответ"; throw new Error("Qwen дважды вернул ответ без JSON-массива changes. Первый ответ: " + firstRaw + "; повтор: " + retryRaw); }
           }
           if (parsed.changes.length > 6) throw new Error("Qwen предложил изменить больше 6 файлов.");
           for (const change of parsed.changes) {
             if (!change || typeof change.path !== "string" || typeof change.content !== "string") throw new Error("Qwen вернул некорректное описание файла.");
-            if (!isDeveloperWritablePath(change.path) || (Array.isArray(assignment.allowedPaths) && assignment.allowedPaths.length && !assignment.allowedPaths.includes(change.path)) || !validRepoPath(change.path) || change.path.split("/").some(part => part.startsWith(".")) ||
-                change.path.includes("node_modules") || change.path.includes("dist/")) {
-              throw new Error("Запрошен недопустимый путь файла: " + change.path);
-            }
+            if (!isDeveloperWritablePath(change.path) || (Array.isArray(assignment.allowedPaths) && assignment.allowedPaths.length && !assignment.allowedPaths.includes(change.path)) || !validRepoPath(change.path) || change.path.split("/").some(part => part.startsWith(".")) || change.path.includes("node_modules") || change.path.includes("dist/")) throw new Error("Запрошен недопустимый путь файла: " + change.path);
             if (change.content.length > 250000) throw new Error("Файл " + change.path + " превышает лимит 250 КБ.");
           }
           return parsed;
         }
-
 
         async function askNorth(assignment, feedback = "") {
           executionStage = feedback ? "north_repair" : "north_implementation";
           if (!usage.agents.includes("north")) usage.agents.push("north");
           const endpoint = "https://openrouter.ai/api/v1/chat/completions";
           const headers = { "content-type": "application/json", "authorization": "Bearer " + env.OPENROUTER_API_KEY, "http-referer": "https://ai-studio.sergey-adadd89.workers.dev", "x-title": "AI Studio" };
-          const userInstruction = "Задача пользователя:\n" + task + "\n\nПлан Gemini:\n" + planText + "\n\n" + contextText + "\n\nТвоё отдельное ТЗ от Gemini:\n" + assignment.task + "\nРазрешённые пути: " + JSON.stringify(assignment.allowedPaths || []) + (feedback ? "\n\nЗамечания ревью:\n" + feedback : "");
+          const scopedContextText = "Контекст только разрешённых файлов:\n" + contextFiles.filter(file => (assignment.allowedPaths || []).includes(file.path)).map(file => "===== " + file.path + " =====\n" + file.content).join("\n\n");
+          const userInstruction = "Задача пользователя:\n" + task + "\n\nПлан Gemini:\n" + planText + "\n\n" + scopedContextText + "\n\nТвоё отдельное ТЗ от Gemini:\n" + assignment.task + "\nРазрешённые пути: " + JSON.stringify(assignment.allowedPaths || []) + (feedback ? "\n\nЗамечания ревью:\n" + feedback : "");
           async function requestNorth(instruction) {
             usage.requests++;
             return fetch(endpoint, { method:"POST", headers, body:JSON.stringify({
