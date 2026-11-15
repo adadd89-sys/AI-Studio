@@ -1609,4 +1609,20 @@ describe("AI Studio Worker", () => {
     assert.ok(app.includes("HTTP-код: не предоставляется Workers AI binding API"));
   });
 
+  it("keeps North as an optional reviewer when Qwen is enabled and includes workflow source in backend context", () => {
+    const core = readFileSync(new URL("./core.js", import.meta.url), "utf8");
+    const app = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
+    assert.match(core, /worker\/workflow\.js/);
+    assert.match(core, /const availableDevelopers = \[teamSettings\.agents\.qwen \? "qwen" : "north"\]/);
+    assert.match(core, /Promise\.all\(reviewTasks\)/);
+    assert.match(app, /Независимый ревьюер Qwen/);
+    assert.match(app, /Qwen — основной разработчик/);
+  });
+
+  it("records the number of files received in successful and failed agent diagnostics", () => {
+    const core = readFileSync(new URL("./core.js", import.meta.url), "utf8");
+    assert.match(core, /filesReceivedCount: contextFiles\.length/);
+    assert.match(core, /filesReceivedCount: Array\.isArray\(filesReceived\)/);
+  });
+
 });
