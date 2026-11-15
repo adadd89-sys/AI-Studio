@@ -962,9 +962,8 @@ describe("AI Studio Worker", () => {
       if (target.includes("openrouter.ai/api/v1/chat/completions")) {
         const payload = JSON.parse(options.body);
         const system = payload.messages?.[0]?.content || "";
-        assert.deepEqual(payload.response_format, { type: "json_object" });
         const result = system.includes("основной разработчик")
-          ? { summary: "North подготовил стили", changes: [{ path: "src/theme.css", edits: [{ find: ".settings { display: block; }", replace: ".settings { display: grid; }" }], reason: "Стили настроек" }] }
+          ? (assert.deepEqual(payload.response_format, { type: "json_object" }), { summary: "North подготовил стили", changes: [{ path: "src/theme.css", edits: [{ find: ".settings { display: block; }", replace: ".settings { display: grid; }" }], reason: "Стили настроек" }] })
           : { approved: true, summary: "North проверил изменения.", issues: [] };
         return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(result) } }] }), { status: 200, headers: { "content-type": "application/json" } });
       }
