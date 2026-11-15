@@ -1123,7 +1123,8 @@ describe("AI Studio Worker", () => {
       const payload = await response.json();
       assert.equal(response.status, 200);
       assert.equal(payload.github, null);
-      assert.doesNotMatch(payload.reply, /PR #1|Al-Studio\\/pull\\/1/);
+      assert.doesNotMatch(payload.reply, /PR #1/);
+      assert.doesNotMatch(payload.reply, /Al-Studio/);
       assert.match(payload.reply, /GitHub не подтвердил|сервер не сохранил изменения и не создал PR/i);
     } finally {
       globalThis.fetch = originalFetch;
