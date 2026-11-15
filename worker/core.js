@@ -116,6 +116,38 @@ export function normalizeAgentAssignments(rawAssignments, availableDevelopers, f
   return assignments;
 }
 
+export function normalizeGeminiPlan(rawPlan) {
+  let plan = rawPlan;
+  for (let depth = 0; depth < 5 && plan && typeof plan === "object" && !Array.isArray(plan); depth++) {
+    const nested = plan.plan || plan.result || plan.data || plan.output || plan.response;
+    if (!nested || typeof nested !== "object" || Array.isArray(nested)) break;
+    if (typeof plan.summary === "string" || Array.isArray(plan.steps) || typeof plan.steps === "string") break;
+    plan = nested;
+  }
+  if (!plan || typeof plan !== "object" || Array.isArray(plan)) return null;
+  const summary = [plan.summary, plan.title, plan.description, plan.goal, plan.objective]
+    .find(value => typeof value === "string" && value.trim());
+  let steps = plan.steps ?? plan.planSteps ?? plan.actions;
+  if (typeof steps === "string" && steps.trim()) steps = [steps.trim()];
+  if (!Array.isArray(steps) || !steps.length) {
+    const assignments = Array.isArray(plan.assignments) ? plan.assignments :
+      Array.isArray(plan.tasks) ? plan.tasks : [];
+    steps = assignments.map(item => {
+      if (typeof item === "string") return item.trim();
+      return [item?.agent, item?.task || item?.description || item?.title]
+        .filter(value => typeof value === "string" && value.trim()).join(": ");
+    }).filter(Boolean);
+  }
+  if (!summary && !steps.length) return null;
+  return {
+    ...plan,
+    summary: summary ? summary.trim() : "План выполнения задачи сформирован Gemini",
+    steps: steps.filter(step => typeof step === "string" && step.trim()).map(step => step.trim()).slice(0, 20),
+    assignments: Array.isArray(plan.assignments) ? plan.assignments :
+      Array.isArray(plan.tasks) ? plan.tasks : plan.assignments
+  };
+}
+
 export function normalizeWorkflowTeamSettings(rawSettings = {}) {
   const agents = rawSettings?.agents && typeof rawSettings.agents === "object" ? rawSettings.agents : {};
   return {
@@ -1371,7 +1403,7 @@ export default {
           "Доступные для изменения файлы (выбирай только точные пути из списка, максимум 6 на исполнителя; README.md, package.json, lock-файлы и конфигурация не разрешены):\n" + assignableRepoFiles.join("\n") +
           "\nЕсли данных достаточно, questions должен быть пустым массивом. Не утверждай, что работа уже выполнена. Задача пользователя: " + task
         ) : { data: { summary: "План сформирован без Gemini в экономном режиме", steps: ["Изучить затронутые файлы", "Подготовить изменения", "Проверить результат"], acceptanceCriteria: [], risks: [], questions: [] }, model: "Локальный план", fallbackUsed: false };
-        let plan = planResult.data;
+        let plan = normalizeGeminiPlan(planResult.data);
         if (typeof plan.summary !== "string" || !Array.isArray(plan.steps) || !plan.steps.length) {
           return json({ error: "Gemini составил план в неожиданном формате." }, 502);
         }
