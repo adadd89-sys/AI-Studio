@@ -65,7 +65,7 @@ describe("Qwen response normalization", () => {
     assert.equal(extractQwenResponseText(payload), '{"summary":"ok","changes":[]}');
   });
   it("parses fenced and nested Qwen changes responses", () => {
-    const fenced = "Here is the result:\\n\\x60\\x60\\x60json\\n{\\"summary\\":\\"ok\\",\\"changes\\":[{\\"path\\":\\"src/App.jsx\\",\\"content\\":\\"x\\"}]}\\n\\x60\\x60\\x60";
+    const fenced = "Here is the result:\n" + String.fromCharCode(96,96,96) + "json\n" + JSON.stringify({ summary: "ok", changes: [{ path: "src/App.jsx", content: "x" }] }) + "\n" + String.fromCharCode(96,96,96);
     assert.equal(parseQwenChangesResponse(fenced).changes[0].path, "src/App.jsx");
     const nested = JSON.stringify({ result: { files: [{ path: "src/styles.css", content: ".team-card{}" }] } });
     assert.equal(parseQwenChangesResponse(nested).changes[0].path, "src/styles.css");
