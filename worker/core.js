@@ -1451,9 +1451,18 @@ function parseJsonObject(value) {
           "Доступные для изменения файлы (выбирай только точные пути из списка, максимум 6 на исполнителя; README.md, package.json, lock-файлы и конфигурация не разрешены):\n" + assignableRepoFiles.join("\n") +
           "\nЕсли данных достаточно, questions должен быть пустым массивом. Не утверждай, что работа уже выполнена. Задача пользователя: " + task
         ) : { data: { summary: "План сформирован без Gemini в экономном режиме", steps: ["Изучить затронутые файлы", "Подготовить изменения", "Проверить результат"], acceptanceCriteria: [], risks: [], questions: [] }, model: "Локальный план", fallbackUsed: false };
-        let plan = normalizeGeminiPlan(planResult.data);
-        if (typeof plan.summary !== "string" || !Array.isArray(plan.steps) || !plan.steps.length) {
-          return json({ error: "Gemini составил план в неожиданном формате." }, 502);
+        let plan = normalizeGeminiPlan(planResult?.data);
+        if (!plan || typeof plan.summary !== "string" || !Array.isArray(plan.steps) || !plan.steps.length) {
+          console.error("Gemini plan normalization failed:", {
+            hasResponse: Boolean(planResult),
+            hasData: Boolean(planResult?.data),
+            model: planResult?.model || null
+          });
+          return json({
+            error: "Gemini не вернул корректный план. Проверьте доступность модели и повторите задачу.",
+            model: planResult?.model || null,
+            fallbackUsed: Boolean(planResult?.fallbackUsed)
+          }, 502);
         }
 
         const availableDevelopers = [];
