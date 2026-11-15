@@ -857,6 +857,11 @@ function App() {
         setReviewStatus('Задача продолжает выполняться в фоне. Она сохранена в разделе «Процессы» и будет восстановлена при следующем открытии.');
         throw new Error('Задача продолжает выполняться в фоне. Её можно отслеживать в разделе «Процессы».');
       }
+      if (Array.isArray(data.usage?.agentResults) && data.usage.agentResults.length) {
+        setAgentExecutionDetails(data.usage.agentResults);
+      } else {
+        setAgentExecutionDetails([]);
+      }
       const actualAgents = Array.isArray(data.agentsUsed) ? data.agentsUsed : [];
       setGeminiCallStatus(actualAgents.includes('gemini') ? true : null);
       const plan = data.plan || { summary: data.summary || 'Задача проанализирована', steps: [], risks: [], questions: [] };

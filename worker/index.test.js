@@ -1583,6 +1583,15 @@ describe("AI Studio Worker", () => {
   });
 
   it("keeps contextFiles in the enclosing scope for the workflow error handler", () => {
+  it("shows successful agent diagnostics after a completed workflow", () => {
+    const source = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
+    const successStart = source.indexOf("const actualAgents = Array.isArray(data.agentsUsed)");
+    const successEnd = source.indexOf("setExecutionResult(data);", successStart);
+    assert.ok(successStart >= 0 && successEnd > successStart);
+    const successHandler = source.slice(successStart, successEnd);
+    assert.match(successHandler, /setAgentExecutionDetails\(data\.usage\?\.agentResults\)/);
+  });
+
     const source = readFileSync(new URL("./core.js", import.meta.url), "utf8");
     assert.ok(source.includes("let contextFiles = [];"));
     assert.ok(source.includes("contextFiles = [];"));
