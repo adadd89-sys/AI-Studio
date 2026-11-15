@@ -49,6 +49,14 @@ export function extractCohereResponseText(payload) {
   }
   return "";
 }
+export function buildAgentContextText(contextFiles) {
+  if (!Array.isArray(contextFiles)) return "";
+  return contextFiles
+    .filter(file => file && typeof file.path === "string" && typeof file.content === "string")
+    .map(file => "===== " + file.path + " =====\n" + file.content)
+    .join("\n\n");
+}
+
 export function parseCohereChangesResponse(payload) {
   const raw = typeof payload === "string" ? payload : extractCohereResponseText(payload);
   if (!raw) return null;
@@ -1500,10 +1508,10 @@ function parseJsonObject(value) {
         const repoFiles = (tree.tree || []).filter(item => item.type === "blob").map(item => item.path).slice(0, 120);
         const assignableRepoFiles = repoFiles.filter(isDeveloperWritablePath);
         if (!assignableRepoFiles.length) throw new Error("В репозитории не найдено файлов, доступных разработчикам для изменения.");
-        const backendTask = /worker|api|сервер|backend|бекенд|авторизац|github|cloudflare|endpoint|маршрут/i.test(task);
+        const backendTask = /worker|api|сервер|backend|бекенд|авторизац|github|cloudflare|endpoint|маршрут|cohere|north|парсер|парсинг/i.test(task);
         const frontendTask = /интерфейс|компонент|страниц|кнопк|дизайн|стил|верстк|react|jsx|css|frontend|фронтенд|teamstatus/i.test(task);
         const contextPaths = backendTask
-          ? ["worker/index.js", "worker/index.test.js", "src/App.jsx"]
+          ? ["worker/core.js", "worker/index.js", "worker/index.test.js", "src/App.jsx"]
           : frontendTask
             ? ["src/App.jsx", "src/styles.css"]
             : ["src/App.jsx", "src/styles.css", "worker/index.js"];
@@ -1600,7 +1608,7 @@ function parseJsonObject(value) {
         async function askQwen(assignment, feedback = "") {
           executionStage = feedback ? "qwen_repair" : "qwen_implementation";
           if (!usage.agents.includes("qwen")) usage.agents.push("qwen");
-          const scopedContextText = "Контекст только разрешённых файлов:\n" + contextFiles.filter(file => (assignment.allowedPaths || []).includes(file.path)).map(file => "===== " + file.path + " =====\n" + file.content).join("\n\n");
+          const scopedContextText = "Контекст файлов только для чтения (allowedPaths ограничивает запись, а не чтение):\n" + buildAgentContextText(contextFiles);
           async function requestQwen(instruction) {
             usage.requests++;
             return runWorkersAIWithRetry(env.AI, qwenModel, { messages: [{ role: "system", content: developerSystem }, { role: "user", content: instruction }], max_completion_tokens: scaledTokenBudget(intensity, 1800, 6144), reasoning_effort: "low", chat_template_kwargs: { enable_thinking: false }, temperature: 0.1 });
@@ -1628,7 +1636,7 @@ function parseJsonObject(value) {
           if (!usage.agents.includes("north")) usage.agents.push("north");
           const endpoint = "https://openrouter.ai/api/v1/chat/completions";
           const headers = { "content-type": "application/json", "authorization": "Bearer " + env.OPENROUTER_API_KEY, "http-referer": "https://ai-studio.sergey-adadd89.workers.dev", "x-title": "AI Studio" };
-          const scopedContextText = "Контекст только разрешённых файлов:\n" + contextFiles.filter(file => (assignment.allowedPaths || []).includes(file.path)).map(file => "===== " + file.path + " =====\n" + file.content).join("\n\n");
+          const scopedContextText = "Контекст файлов только для чтения (allowedPaths ограничивает запись, а не чтение):\n" + buildAgentContextText(contextFiles);
           const userInstruction = "Задача пользователя:\n" + task + "\n\nПлан Gemini:\n" + planText + "\n\n" + scopedContextText + "\n\nТвоё отдельное ТЗ от Gemini:\n" + assignment.task + "\nРазрешённые пути: " + JSON.stringify(assignment.allowedPaths || []) + (feedback ? "\n\nЗамечания ревью:\n" + feedback : "");
           async function requestNorth(instruction) {
             usage.requests++;
