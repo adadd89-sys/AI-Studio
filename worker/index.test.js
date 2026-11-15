@@ -1372,6 +1372,8 @@ describe("AI Studio Worker", () => {
     assert.equal(wrapped.steps.length, 2);
     assert.equal(wrapped.assignments.length, 2);
     assert.equal(wrapped.assignments[0].agent, "qwen");
+    assert.equal(wrapped.assignments[0].task, "Обнови компонент карточек");
+    assert.deepEqual(wrapped.assignments[0].allowedPaths, ["src/App.jsx"]);
     const stringSteps = normalizeGeminiPlan({
       summary: "План",
       steps: "Изучи файлы; внеси изменения; проверь сборку"
