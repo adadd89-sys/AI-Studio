@@ -6,6 +6,9 @@ import {
   Users, Workflow, Zap, FileText, Save, RefreshCw, GitCommit, X, Gauge, BarChart3, MessageCircle
 } from 'lucide-react';
 
+const EXECUTION_POLL_INTERVAL_MS = 5000;
+const EXECUTION_POLL_ATTEMPTS = 360; // 30 minutes at 5-second intervals
+
 const navigation = [
   { label: 'Обзор', icon: LayoutDashboard },
   { label: 'Чат с ИИ', icon: MessageCircle },
@@ -800,8 +803,8 @@ function App() {
       setTasks(current => [jobRecord, ...current.filter(item => item.jobId !== started.jobId)].slice(0, 100));
       let data = null;
       let completed = false;
-      for (let attempt = 0; attempt < 300; attempt++) {
-        await new Promise(resolve => setTimeout(resolve, 2000));
+      for (let attempt = 0; attempt < EXECUTION_POLL_ATTEMPTS; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, EXECUTION_POLL_INTERVAL_MS));
         const statusResponse = await fetch('/api/execute/' + encodeURIComponent(started.jobId));
         const statusData = await statusResponse.json().catch(() => ({}));
         if (!statusResponse.ok) throw new Error(statusData.error || 'Не удалось получить статус задачи.');
