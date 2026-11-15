@@ -1598,6 +1598,6 @@ describe("AI Studio Worker", () => {
     const successEnd = source.indexOf("const actualAgents = Array.isArray(data.agentsUsed)", successStart);
     assert.ok(successStart >= 0 && successEnd > successStart);
     const successHandler = source.slice(successStart, successEnd);
-    assert.match(successHandler, /setAgentExecutionDetails\(data\.usage\?\.agentResults\)/);
+    assert.match(successHandler, /setAgentExecutionDetails\(data\.usage\.agentResults\)/);
   });
 });
