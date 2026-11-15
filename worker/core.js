@@ -29,7 +29,7 @@ export function parseCohereChangesResponse(payload) {
       let depth=0,inString=false,escaped=false;
       for(let i=start;i<cleaned.length;i++){
         const ch=cleaned[i];
-        if(inString){if(escaped)escaped=false;else if(ch==="\\")escaped=true;else if(ch==='"')inString=false;continue;}
+        if(inString){if(escaped)escaped=false;else if(ch==="\")escaped=true;else if(ch==='"')inString=false;continue;}
         if(ch==='"')inString=true;else if(ch==="{")depth++;else if(ch==="}" && --depth===0){parsed=parse(cleaned.slice(start,i+1));break;}
       }
     }
@@ -281,7 +281,7 @@ const GITHUB_API = "https://api.github.com";
 
 function validRepoPath(path) {
   return typeof path === "string" && path.length > 0 && path.length <= 500 &&
-    !path.startsWith("/") && !path.includes("\\") &&
+    !path.startsWith("/") && !path.includes("\") &&
     path.split("/").every(part => part && part !== "." && part !== "..");
 }
 
@@ -1162,7 +1162,7 @@ export default {
             const ch = cleaned[i];
             if (inString) {
               if (escaped) escaped = false;
-              else if (ch === "\\") escaped = true;
+              else if (ch === "\") escaped = true;
               else if (ch === '"') inString = false;
               continue;
             }
@@ -1350,12 +1350,22 @@ export default {
         try {
           assignments = normalizeAgentAssignments(plan.assignments, availableDevelopers, task, fallbackPaths, repoFiles);
         } catch (assignmentError) {
-          await publishTaskProgress("gemini_assignment_repair", "Gemini уточняет задания и разрешённые файлы", {
-            gemini: "Исправляет распределение"
-          });
-          const repairResult = await callGemini(
+          if (!teamSettings.agents.gemini) {
+            const partitioned = availableDevelopers.map((agent, index) => ({
+              agent,
+              task: task + " Выполни часть работы только в своей зоне файлов: " +
+                fallbackPaths.filter((_, pathIndex) => pathIndex % availableDevelopers.length === index).join(", "),
+              allowedPaths: fallbackPaths.filter((_, pathIndex) => pathIndex % availableDevelopers.length === index)
+            }));
+            assignments = normalizeAgentAssignments(partitioned, availableDevelopers, task, fallbackPaths, repoFiles);
+            plan = { ...plan, assignments };
+          } else {
+            await publishTaskProgress("gemini_assignment_repair", "Gemini уточняет задания и разрешённые файлы", {
+              gemini: "Исправляет распределение"
+            });
+            const repairResult = await callGemini(
             "Ты исправляешь только распределение задач для команды разработки AI Studio. " +
-            "Верни только JSON строго вида {\\"assignments\\":[{\\"agent\\":\\"qwen\\",\\"task\\":\\"конкретное отдельное ТЗ\\",\\"allowedPaths\\":[\\"worker/core.js\\"]}]}. " +
+            "Верни только JSON строго вида {\"assignments\":[{\"agent\":\"qwen\",\"task\":\"конкретное отдельное ТЗ\",\"allowedPaths\":[\"worker/core.js\"]}]}. " +
             "Обязательные исполнители: " + JSON.stringify(availableDevelopers) + ". " +
             "Исходная задача пользователя: " + task + ". План: " + JSON.stringify(plan) + ". " +
             "Доступные существующие файлы (разрешено выбирать только точные пути из этого списка):\n" + repoFiles.join("\n") + ". " +
@@ -1368,6 +1378,7 @@ export default {
           } catch (retryError) {
             throw new Error("Gemini не смог исправить распределение заданий. Первичная ошибка: " +
               assignmentError.message + " Повторная проверка: " + retryError.message);
+            }
           }
         }
 
