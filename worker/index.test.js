@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import worker, { WORKFLOW_STEP_TIMEOUT, assertWorkflowExecutionSucceeded, finalizeWorkflowAgentStatuses, extractCohereResponseText, extractQwenResponseText, parseQwenChangesResponse, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isDeveloperWritablePath, normalizeAgentAssignments, normalizeGeminiPlan, normalizeWorkflowTeamSettings, parseCohereChangesResponse, applyCohereTextEdits } from "./core.js";
+import worker, { WORKFLOW_STEP_TIMEOUT, assertWorkflowExecutionSucceeded, finalizeWorkflowAgentStatuses, extractCohereResponseText, extractQwenResponseText, parseQwenChangesResponse, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isDeveloperWritablePath, normalizeAgentAssignments, normalizeGeminiPlan, normalizeWorkflowTeamSettings, parseCohereChangesResponse, applyCohereTextEdits, isWorkersAITimeoutError, runWorkersAIWithRetry } from "./core.js";
 
 const env = {
   APP_PASSWORD: "correct-horse",
@@ -47,6 +47,38 @@ function planRequest(cookie, body = { task: "Создай сайт" }) {
   });
 }
 
+
+describe("Workers AI timeout recovery", () => {
+  it("recognizes Cloudflare internal error 3046 in common error shapes", () => {
+    assert.equal(isWorkersAITimeoutError({ code: 3046, message: "AiError: Request timeout" }), true);
+    assert.equal(isWorkersAITimeoutError({ internalCode: 3046, httpCode: 408 }), true);
+    assert.equal(isWorkersAITimeoutError(new Error("AiError: Request timeout")), true);
+    assert.equal(isWorkersAITimeoutError(new Error("Invalid model")), false);
+  });
+  it("retries a Workers AI 3046 once and returns the successful response", async () => {
+    let calls = 0;
+    const ai = { run: async () => {
+      calls++;
+      if (calls === 1) throw Object.assign(new Error("Request timeout"), { internalCode: 3046 });
+      return { response: "ok" };
+    } };
+    const result = await runWorkersAIWithRetry(ai, "@cf/qwen/qwen3.8-27b", {}, { wait: async () => {} });
+    assert.equal(result.response, "ok");
+    assert.equal(calls, 2);
+  });
+  it("returns a clear 3046 error after the retry is exhausted", async () => {
+    let calls = 0;
+    const ai = { run: async () => {
+      calls++;
+      throw Object.assign(new Error("Request timeout"), { code: 3046 });
+    } };
+    await assert.rejects(
+      runWorkersAIWithRetry(ai, "@cf/qwen/qwen3.8-27b", {}, { wait: async () => {} }),
+      error => error.code === 3046 && /после 2 попыток/.test(error.message)
+    );
+    assert.equal(calls, 2);
+  });
+});
 
 describe("Qwen response normalization", () => {
   it("prefers OpenAI-compatible assistant content over a top-level response field", () => {
