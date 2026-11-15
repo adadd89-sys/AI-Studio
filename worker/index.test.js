@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import worker, { WORKFLOW_STEP_TIMEOUT, assertWorkflowExecutionSucceeded, finalizeWorkflowAgentStatuses, extractCohereResponseText, extractQwenResponseText, parseQwenChangesResponse, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isDeveloperWritablePath, normalizeAgentAssignments, normalizeGeminiPlan, normalizeWorkflowTeamSettings, parseCohereChangesResponse, normalizeCreatedPullRequest, applyCohereTextEdits, isWorkersAITimeoutError, runWorkersAIWithRetry } from "./core.js";
+import worker, { WORKFLOW_STEP_TIMEOUT, assertWorkflowExecutionSucceeded, finalizeWorkflowAgentStatuses, extractCohereResponseText, extractQwenResponseText, parseQwenChangesResponse, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isDeveloperWritablePath, normalizeAgentAssignments, normalizeGeminiPlan, normalizeWorkflowTeamSettings, parseCohereChangesResponse, normalizeCreatedPullRequest, buildAgentContextText, applyCohereTextEdits, isWorkersAITimeoutError, runWorkersAIWithRetry } from "./core.js";
 
 const env = {
   APP_PASSWORD: "correct-horse",
@@ -47,6 +47,22 @@ function planRequest(cookie, body = { task: "Создай сайт" }) {
   });
 }
 
+
+describe("Agent read-only repository context", () => {
+  it("keeps relevant source files readable even when they are outside the agent write allowlist", () => {
+    const context = buildAgentContextText([
+      { path: "worker/core.js", content: "export function parseCohereChangesResponse() {}" },
+      { path: "worker/index.test.js", content: "test coverage" }
+    ]);
+    assert.match(context, /worker\/core\.js/);
+    assert.match(context, /parseCohereChangesResponse/);
+    assert.match(context, /worker\/index\.test\.js/);
+  });
+  it("returns an empty context for invalid input and ignores malformed entries", () => {
+    assert.equal(buildAgentContextText(null), "");
+    assert.equal(buildAgentContextText([{ path: "worker/core.js" }, null]), "");
+  });
+});
 
 describe("GitHub Pull Request response validation", () => {
   it("accepts only a complete PR response for this repository", () => {
