@@ -1844,7 +1844,7 @@ function parseJsonObject(value) {
         async function reviewTeam(changes) {
           const reviewTasks = [];
           if (deepReview) reviewTasks.push(reviewChanges(changes).then(result => ({ agent: "gemma", result })).catch(error => ({ agent: "gemma", error })));
-          if (teamSettings.agents.north && intensity >= 50) reviewTasks.push(reviewWithNorth(changes).then(result => ({ agent: "north", result })).catch(error => ({ agent: "north", error })));
+          if (teamSettings.agents.north && teamSettings.agents.qwen && intensity >= 50) reviewTasks.push(reviewWithNorth(changes).then(result => ({ agent: "north", result })).catch(error => ({ agent: "north", error })));
           if (intensity >= 50) {
             for (const agentKey of ["gemini38", "gemini36", "geminiLite", "gemini31Lite"]) {
               if (teamSettings.agents[agentKey]) reviewTasks.push(reviewWithGeminiModel(agentKey, changes).then(result => ({ agent: agentKey, result })).catch(error => ({ agent: agentKey, error })));
@@ -1882,10 +1882,10 @@ function parseJsonObject(value) {
         }
 
         const hasGeminiReviewers = ["gemini38", "gemini36", "geminiLite", "gemini31Lite"].some(key => teamSettings.agents[key]);
-        const reviewEnabled = deepReview || (teamSettings.agents.north && intensity >= 50) || (hasGeminiReviewers && intensity >= 50);
+        const reviewEnabled = deepReview || (teamSettings.agents.north && teamSettings.agents.qwen && intensity >= 50) || (hasGeminiReviewers && intensity >= 50);
         await publishTaskProgress("review", reviewEnabled ? "Независимые агенты проверяют изменения" : "Проверка пропущена настройками", {
           gemma: deepReview ? "Проверяет" : "Пропущен",
-          north: teamSettings.agents.north && intensity >= 50 ? "Проверяет" : "Пропущен",
+          north: teamSettings.agents.north && teamSettings.agents.qwen && intensity >= 50 ? "Проверяет" : teamSettings.agents.north && !teamSettings.agents.qwen ? "Разрабатывает" : "Пропущен",
           gemini38: teamSettings.agents.gemini38 && intensity >= 50 ? "Проверяет" : "Пропущен",
           gemini36: teamSettings.agents.gemini36 && intensity >= 50 ? "Проверяет" : "Пропущен",
           geminiLite: teamSettings.agents.geminiLite && intensity >= 50 ? "Проверяет" : "Пропущен",
@@ -1895,7 +1895,7 @@ function parseJsonObject(value) {
           : { approved: true, summary: "Ревью пропущено согласно выбранной интенсивности.", issues: [], northReview: null };
         await publishTaskProgress("review_complete", "Проверка изменений завершена", {
           gemma: deepReview ? "Завершил проверку" : "Пропущен",
-          north: teamSettings.agents.north && intensity >= 50 ? (review.reviewFailures?.some(item => item.agent === "north") ? "Ошибка ревью" : "Завершил проверку") : "Пропущен",
+          north: teamSettings.agents.north && teamSettings.agents.qwen && intensity >= 50 ? (review.reviewFailures?.some(item => item.agent === "north") ? "Ошибка ревью" : "Завершил проверку") : teamSettings.agents.north && !teamSettings.agents.qwen ? "Разработчик завершил работу" : "Пропущен",
           gemini38: teamSettings.agents.gemini38 && intensity >= 50 ? "Завершил проверку" : "Пропущен",
           gemini36: teamSettings.agents.gemini36 && intensity >= 50 ? "Завершил проверку" : "Пропущен",
           geminiLite: teamSettings.agents.geminiLite && intensity >= 50 ? "Завершил проверку" : "Пропущен",
