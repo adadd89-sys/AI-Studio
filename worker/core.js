@@ -41,6 +41,27 @@ export function parseCohereChangesResponse(payload) {
   return parsed && Array.isArray(parsed.changes) ? parsed : null;
 }
 
+
+export function applyCohereTextEdits(originalContent, edits) {
+  if (typeof originalContent !== "string" || !Array.isArray(edits) || !edits.length || edits.length > 20) {
+    throw new Error("North вернула некорректный массив точечных изменений.");
+  }
+  let content = originalContent;
+  for (const edit of edits) {
+    if (!edit || typeof edit.find !== "string" || !edit.find || typeof edit.replace !== "string" ||
+        edit.find.length > 12000 || edit.replace.length > 20000) {
+      throw new Error("North вернула некорректную операцию find/replace.");
+    }
+    const first = content.indexOf(edit.find);
+    if (first < 0 || content.indexOf(edit.find, first + edit.find.length) >= 0) {
+      throw new Error("North patch отклонён: искомый фрагмент отсутствует или встречается несколько раз.");
+    }
+    content = content.slice(0, first) + edit.replace + content.slice(first + edit.find.length);
+    if (content.length > 250000) throw new Error("Результат North превышает лимит 250 КБ.");
+  }
+  return content;
+}
+
 export function normalizeAgentAssignments(rawAssignments, availableDevelopers, fallbackTask = "", fallbackPaths = [], knownPaths = []) {
   if (!Array.isArray(availableDevelopers) || !availableDevelopers.length) {
     throw new Error("Не включён ни один разработчик.");
@@ -1454,21 +1475,21 @@ export default {
           async function requestNorth(instruction) {
             usage.requests++;
             return fetch(endpoint, { method:"POST", headers, body:JSON.stringify({
-              model:"cohere/north-mini-code:free", temperature:0.1, max_tokens:scaledTokenBudget(intensity,1800,4096),
+              model:"cohere/north-mini-code:free", temperature:0.1, max_tokens:scaledTokenBudget(intensity,1800,4096), response_format:{type:"json_object"},
               messages:[
-                {role:"system",content:developerSystem+" Обязательная схема: один JSON-объект с полями summary (строка) и changes (массив объектов path, content, reason). Никакого текста вне JSON."},
+                {role:"system",content:"Ты — основной разработчик команды AI Studio. Верни только один JSON-объект {\\\"summary\\\":\\\"...\\\",\\\"changes\\\":[{\\\"path\\\":\\\"src/styles.css\\\",\\\"reason\\\":\\\"...\\\",\\\"edits\\\":[{\\\"find\\\":\\\"точный уникальный фрагмент исходного файла\\\",\\\"replace\\\":\\\"новый фрагмент\\\"}]}]}. Для больших файлов и CSS обязательно используй edits, не переписывай файл целиком. Для небольшого файла допустимо поле content с полным содержимым. Каждый change содержит path, reason и ровно один вариант: content или edits. Не добавляй текст вне JSON. Изменяй только разрешённые пути из задания, не трогай конфигурацию, package-файлы, секреты или README. Максимум 6 файлов."},
                 {role:"user",content:instruction}
               ]
             })});
           }
-          let response=await requestNorth(userInstruction+"\n\nВерни только JSON. Каждый элемент changes обязан содержать path и полное content файла.");
+          let response=await requestNorth(userInstruction+"\n\nВерни только JSON-объект. Для CSS/больших файлов НЕ переписывай весь файл: верни changes с точечными edits:[{find,replace}], где find — короткий точный уникальный фрагмент из переданного контекста, replace — его замена. Для небольших файлов можно вернуть полное content. Никакого текста вне JSON.");
           if(!response.ok){const err=await response.text();throw new Error("OpenRouter North Mini Code: HTTP "+response.status+" — "+err.slice(0,300));}
           let payload=await response.json();
           let parsed=parseCohereChangesResponse(payload);
           if(!parsed){
             const raw=extractCohereResponseText(payload);
             const diagnostic=raw.replace(/\s+/g," ").slice(0,350)||"пустой ответ";
-            response=await requestNorth(userInstruction+"\n\nПРЕДЫДУЩИЙ ОТВЕТ НЕ СООТВЕТСТВОВАЛ ФОРМАТУ. Исправь только формат, не меняй смысл и не добавляй новых изменений. Верни один JSON-объект строго вида {\"summary\":\"...\",\"changes\":[{\"path\":\"src/file.js\",\"content\":\"полное содержимое файла\",\"reason\":\"...\"}]}. Без Markdown и пояснений. Предыдущий ответ: "+raw.slice(0,5000));
+            response=await requestNorth(userInstruction+"\n\nФОРМАТНЫЙ ПОВТОР: верни один JSON-объект {\\\"summary\\\":\\\"...\\\",\\\"changes\\\":[{\\\"path\\\":\\\"src/styles.css\\\",\\\"edits\\\":[{\\\"find\\\":\\\"точный фрагмент исходного файла\\\",\\\"replace\\\":\\\"новый фрагмент\\\"}],\\\"reason\\\":\\\"...\\\"}]}. Для больших файлов обязательно edits, не полное содержимое. Только JSON, без объяснений.");
             if(!response.ok){const err=await response.text();throw new Error("OpenRouter North Mini Code: HTTP "+response.status+" при исправлении формата — "+err.slice(0,300));}
             payload=await response.json();
             parsed=parseCohereChangesResponse(payload);
@@ -1479,7 +1500,17 @@ export default {
           }
           if(parsed.changes.length>6)throw new Error("North предложила изменить больше 6 файлов.");
           for(const change of parsed.changes){
-            if(!change||typeof change.path!=="string"||typeof change.content!=="string"||(Array.isArray(assignment.allowedPaths)&&assignment.allowedPaths.length&&!assignment.allowedPaths.includes(change.path))||!validRepoPath(change.path)||!(change.path==="index.html"||change.path.startsWith("src/")||change.path.startsWith("public/")||change.path.startsWith("worker/"))||change.path.split("/").some(part=>part.startsWith("."))||change.path.includes("node_modules")||change.path.includes("dist/")||change.content.length>250000)throw new Error("North вернула недопустимое изменение файла.");
+            if(!change||typeof change.path!=="string"||(Array.isArray(assignment.allowedPaths)&&assignment.allowedPaths.length&&!assignment.allowedPaths.includes(change.path))||!validRepoPath(change.path)||!(change.path==="index.html"||change.path.startsWith("src/")||change.path.startsWith("public/")||change.path.startsWith("worker/"))||change.path.split("/").some(part=>part.startsWith("."))||change.path.includes("node_modules")||change.path.includes("dist/"))throw new Error("North вернула недопустимое изменение файла.");
+            if(typeof change.content!=="string"&&Array.isArray(change.edits)){
+              const source=await githubRequest(env,"/repos/"+GITHUB_REPO+"/contents/"+change.path.split("/").map(encodeURIComponent).join("/")+"?ref=main");
+              if(typeof source.content!=="string")throw new Error("Не удалось загрузить исходный файл для patch North: "+change.path);
+              const binary=atob(source.content.replace(/\s/g,""));
+              const bytes=Uint8Array.from(binary,char=>char.charCodeAt(0));
+              const original=new TextDecoder("utf-8",{fatal:false}).decode(bytes);
+              change.content=applyCohereTextEdits(original,change.edits);
+              delete change.edits;
+            }
+            if(typeof change.content!=="string"||change.content.length>250000)throw new Error("North должна вернуть content или корректный массив edits для файла: "+change.path);
           }
           return parsed;
         }
