@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import worker, { assertWorkflowExecutionSucceeded, extractCohereResponseText, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isDeveloperWritablePath, normalizeAgentAssignments, normalizeWorkflowTeamSettings, parseCohereChangesResponse } from "./core.js";
+import worker, { assertWorkflowExecutionSucceeded, extractCohereResponseText, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isDeveloperWritablePath, normalizeAgentAssignments, normalizeWorkflowTeamSettings, parseCohereChangesResponse, applyCohereTextEdits } from "./core.js";
 
 const env = {
   APP_PASSWORD: "correct-horse",
@@ -47,6 +47,21 @@ function planRequest(cookie, body = { task: "Создай сайт" }) {
   });
 }
 
+
+describe("Cohere North patch application", () => {
+  it("applies exact unique edits to a large source file", () => {
+    const source = ".agent-card{padding:12px;background:#111}";
+    const result = applyCohereTextEdits(source, [{ find: "padding:12px", replace: "padding:16px" }]);
+    assert.equal(result, ".agent-card{padding:16px;background:#111}");
+  });
+  it("rejects missing or ambiguous patch anchors", () => {
+    assert.throws(() => applyCohereTextEdits(".a{x:1}", [{ find: ".missing", replace: ".b" }]), /отсутствует или встречается несколько раз/);
+    assert.throws(() => applyCohereTextEdits(".a{x:1}.a{x:2}", [{ find: ".a", replace: ".b" }]), /отсутствует или встречается несколько раз/);
+  });
+  it("rejects empty edit lists", () => {
+    assert.throws(() => applyCohereTextEdits("source", []), /некорректный массив/);
+  });
+});
 
 describe("Cohere North response normalization", () => {
   it("parses valid OpenRouter JSON content", () => {
