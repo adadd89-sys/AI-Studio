@@ -1499,6 +1499,8 @@ function parseJsonObject(value) {
       }
 
       let executionStage = "gemini_plan";
+      // Shared with the outer catch so provider failures can report the exact context files sent.
+      let contextFiles = [];
       async function publishTaskProgress(stage, label, agentUpdates = {}) {
         if (!progressJobId || !progressOwnerId || !env.TASKS || typeof env.TASKS.get !== "function" || typeof env.TASKS.put !== "function") return;
         try {
@@ -1531,7 +1533,7 @@ function parseJsonObject(value) {
           : frontendTask
             ? ["src/App.jsx", "src/styles.css"]
             : ["src/App.jsx", "src/styles.css", "worker/index.js"];
-        const contextFiles = [];
+        contextFiles = [];
         for (const path of contextPaths) {
           const item = (tree.tree || []).find(entry => entry.type === "blob" && entry.path === path);
           if (!item) continue;

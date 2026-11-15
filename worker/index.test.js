@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import worker, { WORKFLOW_STEP_TIMEOUT, assertWorkflowExecutionSucceeded, finalizeWorkflowAgentStatuses, extractCohereResponseText, extractQwenResponseText, parseQwenChangesResponse, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isDeveloperWritablePath, normalizeAgentAssignments, normalizeGeminiPlan, normalizeWorkflowTeamSettings, parseCohereChangesResponse, normalizeCreatedPullRequest, buildAgentContextText, applyCohereTextEdits, isWorkersAITimeoutError, runWorkersAIWithRetry } from "./core.js";
 
 const env = {
@@ -1579,6 +1580,13 @@ describe("AI Studio Worker", () => {
     assert.equal(hasTaskSnapshotChanged(queued, unchanged), false);
     assert.equal(hasTaskSnapshotChanged(queued, running), true);
     assert.equal(hasTaskSnapshotChanged(running, { ...running, result: { branch: "task-1" } }), true);
+  });
+
+  it("keeps contextFiles in the enclosing scope for the workflow error handler", () => {
+    const source = readFileSync(new URL("./core.js", import.meta.url), "utf8");
+    assert.ok(source.includes("let contextFiles = [];"));
+    assert.ok(source.includes("contextFiles = [];"));
+    assert.ok(!source.includes("const contextFiles = [];"));
   });
 
 });
