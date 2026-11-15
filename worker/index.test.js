@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import worker, { assertWorkflowExecutionSucceeded, extractCohereResponseText, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isDeveloperWritablePath, normalizeAgentAssignments, normalizeGeminiPlan, normalizeWorkflowTeamSettings, parseCohereChangesResponse, applyCohereTextEdits } from "./core.js";
+import worker, { assertWorkflowExecutionSucceeded, extractCohereResponseText, extractQwenResponseText, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isDeveloperWritablePath, normalizeAgentAssignments, normalizeGeminiPlan, normalizeWorkflowTeamSettings, parseCohereChangesResponse, applyCohereTextEdits } from "./core.js";
 
 const env = {
   APP_PASSWORD: "correct-horse",
@@ -47,6 +47,24 @@ function planRequest(cookie, body = { task: "Создай сайт" }) {
   });
 }
 
+
+describe("Qwen response normalization", () => {
+  it("prefers OpenAI-compatible assistant content over a top-level response field", () => {
+    const generated = JSON.stringify({ summary: "Updated cards", changes: [{ path: "src/App.jsx", content: "export default function App() { return null; }" }] });
+    const payload = {
+      id: "chatcmpl-test", object: "chat.completion",
+      response: JSON.stringify({ error: "gateway metadata, not model output" }),
+      choices: [{ message: { role: "assistant", content: generated } }],
+      usage: { total_tokens: 123 }
+    };
+    assert.equal(extractQwenResponseText(payload), generated);
+    assert.deepEqual(JSON.parse(extractQwenResponseText(payload)).changes.map(change => change.path), ["src/App.jsx"]);
+  });
+  it("supports multipart Qwen assistant content", () => {
+    const payload = { choices: [{ message: { content: [{ type: "text", text: '{"summary":"ok","changes":[]}' }] } }] };
+    assert.equal(extractQwenResponseText(payload), '{"summary":"ok","changes":[]}');
+  });
+});
 
 describe("Cohere North patch application", () => {
   it("applies exact unique edits to a large source file", () => {
