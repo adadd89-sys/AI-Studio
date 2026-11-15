@@ -1834,7 +1834,8 @@ function parseJsonObject(value) {
           if (!usage.agents.includes("north")) usage.agents.push("north");
           usage.agentResults.push({
             agent: "north", status: "success", model: "cohere/north-mini-code:free",
-            filesReceived: contextFiles.map(file => file.path),
+            transport: "OpenRouter HTTP API", providerStatus: "success", upstreamStatus: response.status,
+            filesReceived: contextFiles.map(file => file.path), filesReceivedCount: contextFiles.length,
             rawResponse: rawResponse.slice(0, 12000),
             parsed: { approved: parsed.approved, summary: parsed.summary || "", issues: parsed.issues }
           });
