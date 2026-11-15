@@ -1357,7 +1357,7 @@ export default {
       if (teamSettings.agents.north && !env.OPENROUTER_API_KEY) return json({ error: "Cohere North Mini Code включён, но OPENROUTER_API_KEY ещё не добавлен в секреты Cloudflare." }, 503);
       if (task.length > 6000) return json({ error: "Задача слишком длинная. Максимум — 6000 символов." }, 413);
 
-      const usage = { requests: 0, neurons: null, agents: [] };
+      const usage = { requests: 0, neurons: null, agents: [], agentResults: [] };
       const intensity = teamSettings.mode === "max" ? 100 : teamSettings.intensity;
       const deepReview = teamSettings.agents.gemma && intensity >= 50;
       const allowRepair = intensity >= 80;
@@ -1607,7 +1607,6 @@ function parseJsonObject(value) {
         const planText = JSON.stringify(plan);
         async function askQwen(assignment, feedback = "") {
           executionStage = feedback ? "qwen_repair" : "qwen_implementation";
-          if (!usage.agents.includes("qwen")) usage.agents.push("qwen");
           const scopedContextText = "Контекст файлов только для чтения (allowedPaths ограничивает запись, а не чтение):\n" + buildAgentContextText(contextFiles);
           async function requestQwen(instruction) {
             usage.requests++;
@@ -1628,12 +1627,14 @@ function parseJsonObject(value) {
             if (!isDeveloperWritablePath(change.path) || (Array.isArray(assignment.allowedPaths) && assignment.allowedPaths.length && !assignment.allowedPaths.includes(change.path)) || !validRepoPath(change.path) || change.path.split("/").some(part => part.startsWith(".")) || change.path.includes("node_modules") || change.path.includes("dist/")) throw new Error("Запрошен недопустимый путь файла: " + change.path);
             if (change.content.length > 250000) throw new Error("Файл " + change.path + " превышает лимит 250 КБ.");
           }
+          const rawResponse = modelText(result);
+          if (!usage.agents.includes("qwen")) usage.agents.push("qwen");
+          usage.agentResults.push({ agent: "qwen", status: "success", model: qwenModel, filesReceived: contextFiles.map(file => file.path), rawResponse: rawResponse.slice(0, 12000), parsed: { summary: parsed.summary || "", changes: parsed.changes } });
           return parsed;
         }
 
         async function askNorth(assignment, feedback = "") {
           executionStage = feedback ? "north_repair" : "north_implementation";
-          if (!usage.agents.includes("north")) usage.agents.push("north");
           const endpoint = "https://openrouter.ai/api/v1/chat/completions";
           const headers = { "content-type": "application/json", "authorization": "Bearer " + env.OPENROUTER_API_KEY, "http-referer": "https://ai-studio.sergey-adadd89.workers.dev", "x-title": "AI Studio" };
           const scopedContextText = "Контекст файлов только для чтения (allowedPaths ограничивает запись, а не чтение):\n" + buildAgentContextText(contextFiles);
@@ -1698,6 +1699,9 @@ function parseJsonObject(value) {
             }
             if(typeof change.content!=="string"||change.content.length>250000)throw new Error("North должна вернуть content или корректный массив edits для файла: "+change.path);
           }
+          const rawResponse = extractCohereResponseText(payload);
+          if (!usage.agents.includes("north")) usage.agents.push("north");
+          usage.agentResults.push({ agent: "north", status: "success", model: "cohere/north-mini-code:free", filesReceived: contextFiles.map(file => file.path), rawResponse: rawResponse.slice(0, 12000), parsed: { summary: parsed.summary || "", changes: parsed.changes } });
           return parsed;
         }
         await publishTaskProgress("development", "Разработчики выполняют отдельные задания", {
@@ -1733,7 +1737,7 @@ function parseJsonObject(value) {
           return json({ ok: true, task, plan, summary: implementation.summary || plan.summary,
             model: planResult.model, primaryModel, fallbackUsed: planResult.fallbackUsed,
             qwenModel, gemmaModel, branch: null, filesChanged: [], agentsUsed: usage.agents,
-            usage: { requests: usage.requests, neurons: null },
+            usage: { requests: usage.requests, neurons: null, agentResults: usage.agentResults },
             qwenReview: "Разработчик не предложил изменений файлов.",
             gemmaReview: "Проверка кода не запускалась, так как изменений нет." });
         }
@@ -1902,7 +1906,7 @@ function parseJsonObject(value) {
         return json({ ok: true, task, plan, delegation, pullRequest, pullRequestError, summary: implementation.summary || plan.summary,
           model: planResult.model, primaryModel, fallbackUsed: planResult.fallbackUsed,
           qwenModel, gemmaModel, branch, filesChanged: changed, agentsUsed: usage.agents,
-          usage: { requests: usage.requests, neurons: null },
+          usage: { requests: usage.requests, neurons: null, agentResults: usage.agentResults },
           reviewers: review.reviewers || [],
           qwenReview: teamSettings.agents.qwen ? "Изменения подготовлены Qwen." : "Изменения подготовлены Cohere North Mini Code.",
           gemmaReview: deepReview ? (review.summary || (review.issues.length ? review.issues.join("\n") : "Изменения одобрены.")) : "Ревью пропущено согласно интенсивности.",
