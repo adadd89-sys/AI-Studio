@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import worker, { WORKFLOW_STEP_TIMEOUT, assertWorkflowExecutionSucceeded, extractCohereResponseText, extractQwenResponseText, parseQwenChangesResponse, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isDeveloperWritablePath, normalizeAgentAssignments, normalizeGeminiPlan, normalizeWorkflowTeamSettings, parseCohereChangesResponse, applyCohereTextEdits } from "./core.js";
+import worker, { WORKFLOW_STEP_TIMEOUT, assertWorkflowExecutionSucceeded, finalizeWorkflowAgentStatuses, extractCohereResponseText, extractQwenResponseText, parseQwenChangesResponse, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isDeveloperWritablePath, normalizeAgentAssignments, normalizeGeminiPlan, normalizeWorkflowTeamSettings, parseCohereChangesResponse, applyCohereTextEdits } from "./core.js";
 
 const env = {
   APP_PASSWORD: "correct-horse",
@@ -1411,6 +1411,42 @@ describe("AI Studio Worker", () => {
     });
     assert.deepEqual(stringSteps.steps, ["Изучи файлы; внеси изменения; проверь сборку"]);
     assert.equal(normalizeGeminiPlan({ message: "Не план" }), null);
+  });
+
+  it("marks only agents listed in successful workflow output as completed", () => {
+    const agents = {
+      gemini: "Передал задания",
+      qwen: "Завершил",
+      north: "Завершил",
+      gemma: "Ожидает",
+      gemini38: "Ожидает",
+      gemini36: "Отключён"
+    };
+    assert.deepEqual(finalizeWorkflowAgentStatuses(agents, "complete", ["gemini", "qwen", "north"]), {
+      gemini: "Завершил",
+      qwen: "Завершил",
+      north: "Завершил",
+      gemma: "Пропущен",
+      gemini38: "Пропущен",
+      gemini36: "Отключён"
+    });
+  });
+
+  it("marks only participating or active agents as failed after a workflow error", () => {
+    const agents = {
+      gemini: "Работает",
+      qwen: "Ожидает",
+      north: "Работает",
+      gemma: "Ожидает",
+      gemini38: "Отключён"
+    };
+    assert.deepEqual(finalizeWorkflowAgentStatuses(agents, "failed", ["gemini"]), {
+      gemini: "Ошибка или прервано",
+      qwen: "Пропущен",
+      north: "Ошибка или прервано",
+      gemma: "Пропущен",
+      gemini38: "Отключён"
+    });
   });
 
   it("detects task snapshot changes before writing to KV", () => {
