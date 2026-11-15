@@ -119,6 +119,20 @@ describe("Gemini developer delegation", () => {
       [{ agent: "qwen", task: "Build the feature", allowedPaths: [] }]
     );
   });
+  it("supplies repository-scoped fallback paths for a single developer", () => {
+    assert.deepEqual(
+      normalizeAgentAssignments([], ["qwen"], "Build the feature", ["worker/core.js"], ["worker/core.js", "src/App.jsx"]),
+      [{ agent: "qwen", task: "Build the feature", allowedPaths: ["worker/core.js"] }]
+    );
+  });
+  it("rejects allowed paths that are not present in the repository tree", () => {
+    assert.throws(
+      () => normalizeAgentAssignments([
+        { agent: "qwen", task: "Implement backend", allowedPaths: ["worker/missing.js"] }
+      ], ["qwen"], "Build the feature", [], ["worker/core.js"]),
+      /недопустимый путь файла/
+    );
+  });
 });
 
 describe("AI Studio Worker", () => {
