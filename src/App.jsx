@@ -1175,8 +1175,9 @@ function App() {
                 const usedAgents = executionResult?.agentsUsed || [];
                 const agentWasUsed = agent.key === 'qwen' ? usedAgents.includes('qwen') : usedAgents.includes(agent.key);
                 const result = agent.key === 'gemini' ? geminiCallStatus : agent.key === 'gemma' ? gemmaReview?.ok : agent.key === 'qwen' ? qwenReview?.ok : usedAgents.includes('north');
-                const failed = agent.key === 'gemini' ? geminiCallStatus === false : (agent.key === 'gemma' ? gemmaReview?.ok === false : agent.key === 'qwen' ? qwenReview?.ok === false : false);
-                const status = !teamSettings.agents[agent.key] ? 'Отключён' : executionResult && !agentWasUsed ? 'Не участвовал в этой задаче' : result === true ? 'Вызов подтверждён' : failed ? 'Ошибка вызова' : configured ? 'Подключение настроено · ждёт запуска' : geminiHealth === null ? 'Проверяем подключение…' : agent.key === 'north' ? 'Требуется OPENROUTER_API_KEY' : 'Не настроено';
+                const agentDiagnostic = agentExecutionDetails.find(entry => entry.agent === agent.key);
+                const failed = agent.key === 'gemini' ? geminiCallStatus === false : (agent.key === 'gemma' ? gemmaReview?.ok === false : agent.key === 'qwen' ? qwenReview?.ok === false : agentDiagnostic?.status === 'failed');
+                const status = !teamSettings.agents[agent.key] ? 'Отключён' : agentDiagnostic?.status === 'failed' && agent.key === 'north' ? 'Ошибка ревью' : executionResult && !agentWasUsed ? 'Не участвовал в этой задаче' : result === true ? 'Вызов подтверждён' : failed ? 'Ошибка вызова' : configured ? 'Подключение настроено · ждёт запуска' : geminiHealth === null ? 'Проверяем подключение…' : agent.key === 'north' ? 'Требуется OPENROUTER_API_KEY' : 'Не настроено';
                 return <article className="agent-card" key={agent.key}>
                   <div className="agent-card-top"><img className="agent-logo agent-logo-card" src={agent.logo} alt={agent.name + ' logo'} loading="lazy"/><span className={'agent-status ' + (result === true ? 'is-working' : failed ? 'is-error' : 'is-configured')}><span /> {status}</span></div>
                   <h3>{agent.name}</h3><div className="agent-role">{agent.role}</div><p>{agent.detail}</p>
