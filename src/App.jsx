@@ -1051,6 +1051,20 @@ function App() {
                 {item.events?.length > 0 && <details className="process-hint"><summary>Журнал работы команды ({item.events.length})</summary><ol>{item.events.slice().reverse().map(event => <li key={event.id}>{new Date(event.at).toLocaleTimeString("ru-RU")} · {event.label}</li>)}</ol></details>}
                 {item.error && <p className="process-error">{item.error}</p>}
                 {item.result?.summary && <p className="process-summary">{item.result.summary}</p>}
+                {item.result?.delegation?.length > 0 && <div className="process-agent-results">
+                  <strong>Назначения и результаты исполнителей</strong>
+                  {item.result.delegation.map((entry, index) => <div className="process-agent-result" key={entry.agent + index}>
+                    <span><b>{({ gemini: "Gemini", qwen: "Qwen", north: "Cohere North", gemma: "Gemma" }[entry.agent] || entry.agent)}</b>{entry.files?.length ? " · файлы: " + entry.files.join(", ") : " · файлы не изменялись"}</span>
+                    {entry.summary && <p>{entry.summary}</p>}
+                    {entry.task && <small>{entry.task}</small>}
+                  </div>)}
+                </div>}
+                {item.result?.agentsUsed?.length > 0 && <p className="process-hint">Фактически вызваны: {item.result.agentsUsed.map(key => ({ gemini: "Gemini", gemini38: "Gemini 3.8", gemini36: "Gemini 3.6", geminiLite: "Gemini Flash-Lite", gemini31Lite: "Gemini 3.1 Flash-Lite", qwen: "Qwen", north: "Cohere North", gemma: "Gemma" }[key] || key)).join(" · ")}</p>}
+                {item.result?.qwenReview && <p className="process-hint">Проверка Qwen: {item.result.qwenReview}</p>}
+                {item.result?.gemmaReview && <p className="process-hint">Проверка Gemma: {typeof item.result.gemmaReview === "string" ? item.result.gemmaReview : item.result.gemmaReview.summary || "Результат получен"}</p>}
+                {item.result?.northReview && <p className="process-hint">Проверка Cohere North: {typeof item.result.northReview === "string" ? item.result.northReview : item.result.northReview.summary || "Результат получен"}</p>}
+                {item.result?.pullRequest?.url && <div className="process-links"><a href={item.result.pullRequest.url} target="_blank" rel="noreferrer">Открыть PR #{item.result.pullRequest.number} ↗</a></div>}
+                {item.result?.pullRequestError && <p className="process-error">PR не создан: {item.result.pullRequestError}</p>}
                 {item.result?.branch && <div className="process-links"><a href={'https://github.com/adadd89-sys/AI-Studio/tree/' + item.result.branch} target="_blank" rel="noreferrer">Открыть ветку GitHub ↗</a><a href={'https://github.com/adadd89-sys/AI-Studio/compare/main...' + item.result.branch} target="_blank" rel="noreferrer">Сравнить изменения ↗</a></div>}
                 {item.jobId && ['queued','running'].includes(item.state) && <small className="process-hint">ID: {item.jobId} · Статус обновляется автоматически</small>}
               </article>)}</div>}
