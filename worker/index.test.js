@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import worker, { WORKFLOW_STEP_TIMEOUT, assertWorkflowExecutionSucceeded, finalizeWorkflowAgentStatuses, extractCohereResponseText, extractQwenResponseText, parseQwenChangesResponse, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isDeveloperWritablePath, normalizeAgentAssignments, normalizeGeminiPlan, normalizeWorkflowTeamSettings, parseCohereChangesResponse, normalizeCreatedPullRequest, buildAgentContextText, applyCohereTextEdits, isWorkersAITimeoutError, runWorkersAIWithRetry } from "./core.js";
+import worker, { WORKFLOW_STEP_TIMEOUT, assertWorkflowExecutionSucceeded, finalizeWorkflowAgentStatuses, extractCohereResponseText, extractQwenResponseText, parseQwenChangesResponse, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isDeveloperWritablePath, normalizeAgentAssignments, normalizeGeminiPlan, normalizeWorkflowTeamSettings, parseCohereChangesResponse, normalizeCreatedPullRequest, buildAgentContextText, applyCohereTextEdits, isWorkersAITimeoutError, shouldFallbackQwenToNorth, runWorkersAIWithRetry } from "./core.js";
 
 const env = {
   APP_PASSWORD: "correct-horse",
@@ -89,16 +89,25 @@ describe("Workers AI timeout recovery", () => {
     assert.equal(isWorkersAITimeoutError(new Error("AiError: Request timeout")), true);
     assert.equal(isWorkersAITimeoutError(new Error("Invalid model")), false);
   });
-  it("retries a Workers AI 3046 once and returns the successful response", async () => {
+  it("uses North as a fallback only for Qwen timeouts when North is enabled and configured", () => {
+    const timeout = Object.assign(new Error("Request timeout"), { code: 3046 });
+    const ordinary = new Error("Invalid request");
+    assert.equal(shouldFallbackQwenToNorth(timeout, { northEnabled: true, apiKeyAvailable: true }), true);
+    assert.equal(shouldFallbackQwenToNorth(timeout, { northEnabled: false, apiKeyAvailable: true }), false);
+    assert.equal(shouldFallbackQwenToNorth(timeout, { northEnabled: true, apiKeyAvailable: false }), false);
+    assert.equal(shouldFallbackQwenToNorth(ordinary, { northEnabled: true, apiKeyAvailable: true }), false);
+  });
+
+  it("retries a Workers AI 3046 and returns the successful response", async () => {
     let calls = 0;
     const ai = { run: async () => {
       calls++;
-      if (calls === 1) throw Object.assign(new Error("Request timeout"), { internalCode: 3046 });
+      if (calls < 3) throw Object.assign(new Error("Request timeout"), { internalCode: 3046 });
       return { response: "ok" };
     } };
     const result = await runWorkersAIWithRetry(ai, "@cf/qwen/qwen3.8-27b", {}, { wait: async () => {} });
     assert.equal(result.response, "ok");
-    assert.equal(calls, 2);
+    assert.equal(calls, 3);
   });
   it("returns a clear 3046 error after the retry is exhausted", async () => {
     let calls = 0;
@@ -108,9 +117,9 @@ describe("Workers AI timeout recovery", () => {
     } };
     await assert.rejects(
       runWorkersAIWithRetry(ai, "@cf/qwen/qwen3.8-27b", {}, { wait: async () => {} }),
-      error => error.code === 3046 && /после 2 попыток/.test(error.message)
+      error => error.code === 3046 && /после 3 попыток/.test(error.message)
     );
-    assert.equal(calls, 2);
+    assert.equal(calls, 3);
   });
 });
 
