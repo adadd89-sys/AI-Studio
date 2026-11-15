@@ -1094,6 +1094,42 @@ describe("AI Studio Worker", () => {
   });
 
 
+  it("does not report a model-invented PR when GitHub did not create one", async () => {
+    const cookie = await getSessionCookie();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url) => {
+      const target = String(url);
+      if (target.includes("generativelanguage.googleapis.com")) {
+        return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "Готово. Создал PR #1: https://github.com/Al-Studio/pull/1" }] } }] }), {
+          status: 200, headers: { "content-type": "application/json" }
+        });
+      }
+      if (target.endsWith("/git/ref/heads/main")) {
+        return new Response(JSON.stringify({ object: { sha: "a".repeat(40) } }), { status: 200 });
+      }
+      if (target.includes("/git/trees/") && target.includes("?recursive=1")) {
+        return new Response(JSON.stringify({ tree: [] }), { status: 200 });
+      }
+      throw new Error("Unexpected mocked request: " + target);
+    };
+    try {
+      const response = await worker.fetch(new Request("https://studio.test/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie, origin: "https://studio.test" },
+        body: JSON.stringify({ message: "Исправь код в репозитории", history: [], teamSettings: {
+          intensity: 50, agents: { gemini: true, qwen: false, gemma: false, north: false }
+        } })
+      }), { ...env, GITHUB_TOKEN: "test-token", GEMINI_API_KEY: "test-gemini-key" });
+      const payload = await response.json();
+      assert.equal(response.status, 200);
+      assert.equal(payload.github, null);
+      assert.doesNotMatch(payload.reply, /PR #1|Al-Studio\\/pull\\/1/);
+      assert.match(payload.reply, /GitHub не подтвердил|сервер не сохранил изменения и не создал PR/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("lets Gemini read, edit a separate GitHub branch and open a PR from chat tools", async () => {
     const cookie = await getSessionCookie();
     const originalFetch = globalThis.fetch;
