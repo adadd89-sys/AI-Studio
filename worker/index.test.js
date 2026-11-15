@@ -998,7 +998,7 @@ describe("AI Studio Worker", () => {
     assert.match((await response.json()).error, /Workers AI/);
   });
 
-  it("coordinates Gemini, Qwen and Gemma and writes approved files to a separate branch", async () => {
+  it("coordinates Gemini and Qwen implementation with independent North and Gemma review", async () => {
     const originalFetch = globalThis.fetch;
     const cookie = await getSessionCookie();
     const writes = [];
@@ -1016,8 +1016,7 @@ describe("AI Studio Worker", () => {
         if (prompt.includes("Ты исправляешь только распределение задач")) assignmentRepairPrompts.push(prompt);
         const responseData = prompt.includes("Ты исправляешь только распределение задач")
           ? { assignments: [
-              { agent: "qwen", task: "Обнови компонент приложения для экрана настроек", allowedPaths: ["src/App.jsx"] },
-              { agent: "north", task: "Добавь стили для экрана настроек", allowedPaths: ["src/theme.css"] }
+              { agent: "qwen", task: "Обнови компонент приложения для экрана настроек", allowedPaths: ["src/App.jsx"] }
             ] }
           : {
               summary: "Добавить экран настроек",
@@ -1107,21 +1106,21 @@ describe("AI Studio Worker", () => {
       assert.deepEqual(requestedGeminiModels, [...expectedFallbackSequence, ...expectedFallbackSequence]);
       assert.ok(assignmentRepairPrompts.length > 0);
       for (const prompt of assignmentRepairPrompts) {
-        assert.match(prompt, /Предыдущая ошибка проверки: Gemini назначил недопустимый путь файла для north: README\.md/);
+        assert.match(prompt, /Предыдущая ошибка проверки: Gemini назначил задачу агенту, который отключён или не является разработчиком/);
         const offeredPaths = prompt.split("Доступные для изменения файлы")[1].split(". Назначь")[0].split("\n").slice(1).join("\n");
         assert.equal(offeredPaths.includes("README.md"), false);
-        assert.equal(offeredPaths.includes("src/theme.css"), true);
+        assert.equal(offeredPaths.includes("src/App.jsx"), true);
       }
       assert.match(result.branch, /^ai-studio\/task-/);
-      assert.deepEqual(result.filesChanged.map(file => file.path).sort(), ["src/App.jsx", "src/theme.css"]);
+      assert.deepEqual(result.filesChanged.map(file => file.path).sort(), ["src/App.jsx"]);
       assert.match(result.gemmaReview, /Gemma: Изменения корректны\./);
-      assert.deepEqual(result.delegation.map(item => item.agent).sort(), ["north", "qwen"]);
+      assert.deepEqual(result.delegation.map(item => item.agent).sort(), ["qwen"]);
       assert.equal(result.pullRequest.number, 41);
       assert.equal(result.pullRequest.url, "https://github.com/adadd89-sys/AI-Studio/pull/41");
-      assert.equal(writes.length, 2);
+      assert.equal(writes.length, 1);
       assert.ok(writes.every(write => write.branch === result.branch));
       assert.ok(writes.some(write => write.content === btoa("export default function Settings() { return <main>Settings</main>; }")));
-      assert.ok(writes.some(write => write.content === btoa(".settings { display: grid; }")));
+      assert.ok(writes.every(write => write.content !== btoa(".settings { display: grid; }")));
     } finally {
       globalThis.fetch = originalFetch;
     }
