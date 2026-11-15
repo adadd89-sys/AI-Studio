@@ -435,6 +435,20 @@ function hasSameOrigin(request) {
 
 
 const GITHUB_REPO = "adadd89-sys/AI-Studio";
+
+export function normalizeCreatedPullRequest(pr) {
+  const number = pr?.number;
+  const url = typeof pr?.html_url === "string" ? pr.html_url : "";
+  let parsedUrl;
+  try { parsedUrl = new URL(url); } catch { parsedUrl = null; }
+  const expectedPath = "/" + GITHUB_REPO + "/pull/" + number;
+  if (!Number.isSafeInteger(number) || number <= 0 ||
+      !parsedUrl || parsedUrl.protocol !== "https:" ||
+      parsedUrl.hostname !== "github.com" || parsedUrl.pathname !== expectedPath) {
+    throw new Error("GitHub вернул неполный или некорректный ответ при создании Pull Request: требуются корректные number и html_url.");
+  }
+  return { number, url, state: typeof pr.state === "string" ? pr.state : "unknown" };
+}
 const GITHUB_API = "https://api.github.com";
 
 function validRepoPath(path) {
@@ -573,7 +587,7 @@ async function runGeminiGithubTool(name, args, env, state) {
       body: String(args.body || "Изменения подготовлены агентом AI Studio.").slice(0, 5000),
       head: branch, base: "main", draft: false
     }) });
-    state.pullRequest = { number: pr.number, url: pr.html_url, branch, state: pr.state, filesChanged: [...state.writtenFiles] };
+    state.pullRequest = { ...normalizeCreatedPullRequest(pr), branch, filesChanged: [...state.writtenFiles] };
     return state.pullRequest;
   }
   throw new Error("Неизвестный инструмент GitHub.");
@@ -1621,7 +1635,7 @@ function parseJsonObject(value) {
             return fetch(endpoint, { method:"POST", headers, body:JSON.stringify({
               model:"cohere/north-mini-code:free", temperature:0.1, max_tokens:scaledTokenBudget(intensity,1800,4096), response_format:{type:"json_object"},
               messages:[
-                {role:"system",content:"Ты — основной разработчик команды AI Studio. Верни только один JSON-объект {\\\"summary\\\":\\\"...\\\",\\\"changes\\\":[{\\\"path\\\":\\\"src/styles.css\\\",\\\"reason\\\":\\\"...\\\",\\\"edits\\\":[{\\\"find\\\":\\\"точный уникальный фрагмент исходного файла\\\",\\\"replace\\\":\\\"новый фрагмент\\\"}]}]}. Для больших файлов и CSS обязательно используй edits, не переписывай файл целиком. Для небольшого файла допустимо поле content с полным содержимым. Каждый change содержит path, reason и ровно один вариант: content или edits. Не добавляй текст вне JSON. Изменяй только разрешённые пути из задания, не трогай конфигурацию, package-файлы, секреты или README. Максимум 6 файлов."},
+                {role:"system",content:"Ты — основной разработчик команды AI Studio. Верни строго один валидный JSON-объект без обратных слешей перед кавычками вне JSON-строк и без Markdown. Схема: {\"summary\":\"краткое описание\",\"changes\":[{\"path\":\"src/styles.css\",\"reason\":\"причина\",\"edits\":[{\"find\":\"точный уникальный фрагмент исходного файла\",\"replace\":\"новый фрагмент\"}]}]}. Каждый change содержит path, reason и ровно один вариант: content (полное содержимое небольшого файла) или edits (массив точечных замен). Если изменений действительно не требуется, верни changes: []. Не добавляй текст вне JSON. Изменяй только разрешённые пути из задания, не трогай конфигурацию, package-файлы, секреты или README. Максимум 6 файлов."},
                 {role:"user",content:instruction}
               ]
             })});
@@ -1633,7 +1647,7 @@ function parseJsonObject(value) {
           if(!parsed){
             const raw=extractCohereResponseText(payload);
             const diagnostic=raw.replace(/\s+/g," ").slice(0,350)||"пустой ответ";
-            response=await requestNorth(userInstruction+"\n\nФОРМАТНЫЙ ПОВТОР: верни один JSON-объект {\\\"summary\\\":\\\"...\\\",\\\"changes\\\":[{\\\"path\\\":\\\"src/styles.css\\\",\\\"edits\\\":[{\\\"find\\\":\\\"точный фрагмент исходного файла\\\",\\\"replace\\\":\\\"новый фрагмент\\\"}],\\\"reason\\\":\\\"...\\\"}]}. Для больших файлов обязательно edits, не полное содержимое. Только JSON, без объяснений.");
+            response=await requestNorth(userInstruction+"\n\nФОРМАТНЫЙ ПОВТОР: верни валидный JSON без обратных слешей перед кавычками вне строк. Пример структуры: "+JSON.stringify({summary:"Краткое описание",changes:[{path:"src/styles.css",reason:"Причина",edits:[{find:"точный фрагмент исходного файла",replace:"новый фрагмент"}]}]})+". Для больших файлов обязательно edits, не полное содержимое. Если изменений не требуется, верни changes: []. Только JSON, без объяснений.");
             if(!response.ok){const err=await response.text();throw new Error("OpenRouter North Mini Code: HTTP "+response.status+" при исправлении формата — "+err.slice(0,300));}
             payload=await response.json();
             parsed=parseCohereChangesResponse(payload);
@@ -1870,7 +1884,7 @@ function parseJsonObject(value) {
             body: "Подготовлено командой AI Studio.\n\nЗадача: " + task.slice(0, 3000) + "\n\nИсполнители: " + delegation.map(item => item.agent + " — " + item.files.join(", ")).join("; ") + "\n\nНезависимое ревью: " + ((review.reviewers || []).join(", ") || "не запускалось по настройкам интенсивности"),
             head: branch, base: "main", draft: false
           }) });
-          pullRequest = { number: pr.number, url: pr.html_url, state: pr.state };
+          pullRequest = normalizeCreatedPullRequest(pr);
         } catch (prError) { pullRequestError = prError?.message || "Не удалось открыть Pull Request."; }
         await publishTaskProgress("complete", "Задача завершена · результаты сохранены", {
           gemini: teamSettings.agents.gemini ? "Завершил" : "Пропущен",
