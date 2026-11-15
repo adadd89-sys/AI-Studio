@@ -41,13 +41,20 @@ export function parseCohereChangesResponse(payload) {
   return parsed && Array.isArray(parsed.changes) ? parsed : null;
 }
 
-export function normalizeAgentAssignments(rawAssignments, availableDevelopers, fallbackTask = "") {
+export function normalizeAgentAssignments(rawAssignments, availableDevelopers, fallbackTask = "", fallbackPaths = [], knownPaths = []) {
   if (!Array.isArray(availableDevelopers) || !availableDevelopers.length) {
     throw new Error("Не включён ни один разработчик.");
   }
   if (!Array.isArray(rawAssignments) || rawAssignments.length === 0) {
     if (availableDevelopers.length === 1) {
-      return [{ agent: availableDevelopers[0], task: fallbackTask, allowedPaths: [] }];
+      const paths = [...new Set(Array.isArray(fallbackPaths) ? fallbackPaths : [])];
+      if (paths.length > 6 || paths.some(path => typeof path !== "string" || !validRepoPath(path) ||
+          !(path === "index.html" || path.startsWith("src/") || path.startsWith("public/") || path.startsWith("worker/")) ||
+          (Array.isArray(knownPaths) && knownPaths.length > 0 && !knownPaths.includes(path)) ||
+          path.split("/").some(part => part.startsWith(".")) || path.includes("node_modules") || path.includes("dist/"))) {
+        throw new Error("Не удалось безопасно определить разрешённые файлы для резервного задания.");
+      }
+      return [{ agent: availableDevelopers[0], task: fallbackTask, allowedPaths: paths }];
     }
     throw new Error("Gemini не распределил отдельные задания между всеми включёнными разработчиками.");
   }
@@ -70,7 +77,8 @@ export function normalizeAgentAssignments(rawAssignments, availableDevelopers, f
     for (const path of paths) {
       if (typeof path !== "string" || !validRepoPath(path) ||
           !(path === "index.html" || path.startsWith("src/") || path.startsWith("public/") || path.startsWith("worker/")) ||
-          path.split("/").some(part => part.startsWith(".")) || path.includes("node_modules") || path.includes("dist/")) {
+          path.split("/").some(part => part.startsWith(".")) || path.includes("node_modules") || path.includes("dist/") ||
+          (Array.isArray(knownPaths) && knownPaths.length > 0 && !knownPaths.includes(path))) {
         throw new Error("Gemini назначил недопустимый путь файла для " + agent + ": " + String(path));
       }
       if (claimedPaths.has(path)) throw new Error("Gemini назначил один файл нескольким разработчикам: " + path);
@@ -1292,21 +1300,6 @@ export default {
         }
       }
       try {
-        await publishTaskProgress("gemini_plan", "Gemini формирует технический план", {
-          gemini: teamSettings.agents.gemini ? "Работает" : "Пропущен"
-        });
-        const planResult = teamSettings.agents.gemini ? await callGemini(
-          "Ты — руководитель команды разработки AI Studio. Проанализируй задачу и составь конкретный исполнимый план для изменения текущего репозитория AI Studio. " +
-          "Верни только JSON: {\"summary\":\"...\",\"steps\":[\"...\"],\"acceptanceCriteria\":[\"...\"],\"risks\":[\"...\"],\"questions\":[],\"assignments\":[{\"agent\":\"qwen|north\",\"task\":\"отдельное ТЗ\",\"allowedPaths\":[\"src/...\"]}]}. " +
-          "Если включены Qwen и North, разложи работу на независимые подзадачи и назначь их обоим; если включён только один разработчик — назначь ему всю работу. " +
-          "Каждая подзадача должна иметь конкретную цель и allowedPaths — точный список файлов, которые разрешено менять. Не назначай Gemma разработчиком: она выполняет независимое ревью. " +
-          "Не допускай пересечения allowedPaths между исполнителями. Если данных достаточно, questions должен быть пустым массивом. Не утверждай, что работа уже выполнена. Задача пользователя: " + task
-        ) : { data: { summary: "План сформирован без Gemini в экономном режиме", steps: ["Изучить затронутые файлы", "Подготовить изменения", "Проверить результат"], acceptanceCriteria: [], risks: [], questions: [] }, model: "Локальный план", fallbackUsed: false };
-        const plan = planResult.data;
-        if (typeof plan.summary !== "string" || !Array.isArray(plan.steps) || !plan.steps.length) {
-          return json({ error: "Gemini составил план в неожиданном формате." }, 502);
-        }
-
         executionStage = "github_context";
         await publishTaskProgress("github_context", "Изучение контекста GitHub", { gemini: teamSettings.agents.gemini ? "Завершил план" : "Пропущен" });
         const mainRef = await githubRequest(env, "/repos/" + GITHUB_REPO + "/git/ref/heads/main");
@@ -1329,6 +1322,52 @@ export default {
           const bytes = Uint8Array.from(binary, char => char.charCodeAt(0));
           const content = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
           contextFiles.push({ path, content: content.slice(0, path === "worker/index.js" ? 9000 : 12000) });
+        }
+
+        await publishTaskProgress("gemini_plan", "Gemini формирует технический план", {
+          gemini: teamSettings.agents.gemini ? "Работает" : "Пропущен"
+        });
+        const planResult = teamSettings.agents.gemini ? await callGemini(
+          "Ты — руководитель команды разработки AI Studio. Проанализируй задачу и составь конкретный исполнимый план для изменения текущего репозитория AI Studio. " +
+          "Верни только JSON: {\"summary\":\"...\",\"steps\":[\"...\"],\"acceptanceCriteria\":[\"...\"],\"risks\":[\"...\"],\"questions\":[],\"assignments\":[{\"agent\":\"qwen|north\",\"task\":\"отдельное ТЗ\",\"allowedPaths\":[\"src/...\"]}]}. " +
+          "Если включены Qwen и North, разложи работу на независимые подзадачи и назначь их обоим; если включён только один разработчик — назначь ему всю работу. " +
+          "Каждая подзадача должна иметь конкретную цель и allowedPaths — точный список файлов, которые разрешено менять. Не назначай Gemma разработчиком: она выполняет независимое ревью. " +
+          "Не допускай пересечения allowedPaths между исполнителями. allowedPaths должны содержать только точные пути существующих файлов из дерева ниже; не выдумывай пути и не используй каталоги. " +
+          "Доступные файлы репозитория (выбери только необходимые, максимум 6 на исполнителя):\\n" + repoFiles.join("\\n") +
+          "\\nЕсли данных достаточно, questions должен быть пустым массивом. Не утверждай, что работа уже выполнена. Задача пользователя: " + task
+        ) : { data: { summary: "План сформирован без Gemini в экономном режиме", steps: ["Изучить затронутые файлы", "Подготовить изменения", "Проверить результат"], acceptanceCriteria: [], risks: [], questions: [] }, model: "Локальный план", fallbackUsed: false };
+        let plan = planResult.data;
+        if (typeof plan.summary !== "string" || !Array.isArray(plan.steps) || !plan.steps.length) {
+          return json({ error: "Gemini составил план в неожиданном формате." }, 502);
+        }
+
+        const availableDevelopers = [];
+        if (teamSettings.agents.qwen) availableDevelopers.push("qwen");
+        if (teamSettings.agents.north) availableDevelopers.push("north");
+        const fallbackPaths = contextPaths.filter(path => repoFiles.includes(path)).slice(0, 6);
+        let assignments;
+        try {
+          assignments = normalizeAgentAssignments(plan.assignments, availableDevelopers, task, fallbackPaths, repoFiles);
+        } catch (assignmentError) {
+          await publishTaskProgress("gemini_assignment_repair", "Gemini уточняет задания и разрешённые файлы", {
+            gemini: "Исправляет распределение"
+          });
+          const repairResult = await callGemini(
+            "Ты исправляешь только распределение задач для команды разработки AI Studio. " +
+            "Верни только JSON строго вида {\\"assignments\\":[{\\"agent\\":\\"qwen\\",\\"task\\":\\"конкретное отдельное ТЗ\\",\\"allowedPaths\\":[\\"worker/core.js\\"]}]}. " +
+            "Обязательные исполнители: " + JSON.stringify(availableDevelopers) + ". " +
+            "Исходная задача пользователя: " + task + ". План: " + JSON.stringify(plan) + ". " +
+            "Доступные существующие файлы (разрешено выбирать только точные пути из этого списка):\\n" + repoFiles.join("\\n") + ". " +
+            "Назначь ровно по одному заданию каждому исполнителю; task обязателен, конкретен и не пуст; allowedPaths — непустой массив существующих файлов, максимум 6 на исполнителя. " +
+            "Пути не должны пересекаться между исполнителями. Не добавляй иных полей и не возвращай пояснения."
+          );
+          plan = { ...plan, assignments: repairResult.data.assignments };
+          try {
+            assignments = normalizeAgentAssignments(plan.assignments, availableDevelopers, task, fallbackPaths, repoFiles);
+          } catch (retryError) {
+            throw new Error("Gemini не смог исправить распределение заданий. Первичная ошибка: " +
+              assignmentError.message + " Повторная проверка: " + retryError.message);
+          }
         }
 
         const developerSystem =
@@ -1420,10 +1459,6 @@ export default {
           }
           return parsed;
         }
-        const availableDevelopers = [];
-        if (teamSettings.agents.qwen) availableDevelopers.push("qwen");
-        if (teamSettings.agents.north) availableDevelopers.push("north");
-        const assignments = normalizeAgentAssignments(plan.assignments, availableDevelopers, task);
         await publishTaskProgress("development", "Разработчики выполняют отдельные задания", {
           qwen: teamSettings.agents.qwen ? "Работает" : "Отключён",
           north: teamSettings.agents.north ? "Работает" : "Отключён",
