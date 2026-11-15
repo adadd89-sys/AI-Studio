@@ -914,7 +914,7 @@ describe("AI Studio Worker", () => {
               risks: [],
               questions: [],
               assignments: [
-                { agent: "qwen", task: "Создай компонент настроек", allowedPaths: ["src/new-screen.jsx"] },
+                { agent: "qwen", task: "Создай компонент настроек", allowedPaths: ["src/App.jsx"] },
                 { agent: "north", task: "Обнови документацию", allowedPaths: ["README.md"] }
               ]
             };
