@@ -919,8 +919,7 @@ describe("AI Studio Worker", () => {
       if (target.includes("/contents/src/App.jsx?ref=main")) {
         return new Response(JSON.stringify({ content: btoa("export default function App() { return null; }"), sha: "a".repeat(40) }), { status: 200 });
       }
-      if (target.includes("/contents/src/App.jsx?ref=ai-studio%2Ftask-test") ||
-          target.includes("/contents/src/theme.css?ref=ai-studio%2Ftask-test")) {
+      if (target.includes("/contents/") && target.includes("?ref=ai-studio%2Ftask-")) {
         return new Response(JSON.stringify({ sha: "d".repeat(40) }), { status: 200 });
       }
       if (target.includes("/git/ref/heads/main")) {
