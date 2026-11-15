@@ -826,6 +826,7 @@ export default {
       const messages = [...history, { role: "user", content: message }];
       try {
         let reply = "";
+        let usedModel = null;
         let githubState = { createdBranches: new Set(), writtenFiles: new Set(), pullRequest: null };
         if (agent.startsWith("gemini")) {
           if (!env.GEMINI_API_KEY) return json({ error: "Gemini включён, но GEMINI_API_KEY не настроен." }, 503);
@@ -920,15 +921,19 @@ export default {
               throw Object.assign(new Error(errorPayload?.error?.message || "Резервная модель Gemini вернула HTTP " + finalResponse.status), { status: finalResponse.status });
             }
             const finalPayload = await finalResponse.json();
+            activeModel = finalModel;
             reply = (finalPayload?.candidates?.[0]?.content?.parts || []).map(part => part.text || "").join("").trim();
           }
+          usedModel = activeModel;
         } else if (agent === "qwen" || agent === "gemma") {
           if (!env.AI) return json({ error: "Cloudflare Workers AI не настроен." }, 503);
           const model = agent === "qwen" ? (env.QWEN_MODEL || "@cf/qwen/qwen3.8-27b") : (env.GEMMA_MODEL || "@cf/google/gemma-4-26b-a4b-it");
+          usedModel = model;
           const result = await env.AI.run(model, { messages: [{ role: "system", content: "Ты — собеседник AI Studio. Отвечай естественно, по-русски, кратко и по существу. Не утверждай, что изменил файлы или выполнил действия в GitHub: GitHub-инструменты в этом режиме доступны только Gemini." }, ...messages], max_completion_tokens: scaledTokenBudget(intensity, 2048, 8192), temperature: 0.5 });
           reply = result?.response || result?.choices?.[0]?.message?.content || result?.choices?.[0]?.message?.reasoning_content || "";
         } else {
           if (!env.OPENROUTER_API_KEY) return json({ error: "Cohere North Mini Code включён, но OPENROUTER_API_KEY не настроен." }, 503);
+          usedModel = "cohere/north-mini-code:free";
           const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
             method: "POST", headers: { "content-type": "application/json", "authorization": "Bearer " + env.OPENROUTER_API_KEY, "http-referer": "https://ai-studio.sergey-adadd89.workers.dev", "x-title": "AI Studio" },
             body: JSON.stringify({ model: "cohere/north-mini-code:free", max_tokens: scaledTokenBudget(intensity, 2048, 8192), messages: [{ role: "system", content: "Ты — собеседник AI Studio. Отвечай по-русски. В этом режиме инструменты GitHub доступны только Gemini. Не утверждай, что самостоятельно менял файлы или создавал PR." }, ...messages] })
@@ -1019,9 +1024,10 @@ export default {
           }
         }
 
-        const agentLabel = GEMINI_AGENT_LABELS[agent] || (agent === "qwen" ? "Qwen" : agent === "gemma" ? "Gemma" : "Cohere North");
+        const actualGeminiKey = Object.keys(GEMINI_AGENT_MODELS).find(key => GEMINI_AGENT_MODELS[key] === usedModel);
+        const agentLabel = actualGeminiKey ? GEMINI_AGENT_LABELS[actualGeminiKey] : (agent === "qwen" ? "Qwen" : agent === "gemma" ? "Gemma" : "Cohere North");
         const agentsUsed = [...new Set([agent, ...consultations.map(item => item.key)])];
-        return json({ ok: true, reply: reply.trim(), agent, agentLabel, agentsUsed, teamMode: needsTeamConsultation ? "collaborative" : "lead_only", github: githubState.pullRequest, filesChanged: [...githubState.writtenFiles], usage: { requests: 1 + consultationRequests, neurons: null }, consultationFailures: consultTasks.length - consultations.length });
+        return json({ ok: true, reply: reply.trim(), agent, agentLabel, model: usedModel, agentsUsed, teamMode: needsTeamConsultation ? "collaborative" : "lead_only", github: githubState.pullRequest, filesChanged: [...githubState.writtenFiles], usage: { requests: 1 + consultationRequests, neurons: null }, consultationFailures: consultTasks.length - consultations.length });
       } catch (error) {
         // If the selected Gemini model chain is unavailable, hand the same request
         // to the next enabled provider instead of leaving the user without an answer.
