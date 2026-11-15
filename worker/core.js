@@ -60,7 +60,7 @@ export function buildAgentContextText(contextFiles) {
 export function createAgentFailureDiagnostic({ agent, model, filesReceived = [], error, upstreamStatus = null }) {
   const message = String(error?.message || error || "Неизвестная ошибка агента.")
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]")
-    .replace(/(\\bkey=)[^&\s]+/gi, "$1[REDACTED]")
+    .replace(/(\bkey=)[^&\s]+/gi, "$1[REDACTED]")
     .replace(/(["']?(?:api[_-]?key|authorization|token)["']?\s*:\s*["'])[^"']+/gi, "$1[REDACTED]")
     .slice(0, 1500);
   return {
