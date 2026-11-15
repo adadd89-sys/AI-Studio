@@ -1563,8 +1563,28 @@ function parseJsonObject(value) {
             payload=await response.json();
             parsed=parseCohereChangesResponse(payload);
             if(!parsed){
-              const retryRaw=extractCohereResponseText(payload).replace(/\s+/g," ").slice(0,350)||"пустой ответ";
-              throw new Error("Cohere North Mini Code дважды вернула ответ без JSON-массива changes. Первый ответ: "+diagnostic+"; повтор: "+retryRaw);
+              const retryRaw=extractCohereResponseText(payload).replace(/\s+/g," ").slice(0,1200)||"пустой ответ";
+              // A prose-only retry is not actionable. Give North one final, schema-focused
+              // attempt and include both rejected outputs so it can correct the format.
+              response=await requestNorth(
+                "ПОСЛЕДНЯЯ ПОПЫТКА: предыдущие ответы не подходят, потому что содержат обычный текст вместо JSON. " +
+                "Не описывай план и не пересказывай задачу. Выполни назначенную работу и верни ТОЛЬКО валидный JSON-объект следующей формы: " +
+                "{\\"summary\\":\\"Краткое описание\\",\\"changes\\":[{\\"path\\":\\"src/styles.css\\",\\"reason\\":\\"Причина\\",\\"edits\\":[{\\"find\\":\\"точный уникальный фрагмент исходного CSS\\",\\"replace\\":\\"готовая замена CSS\\"}]}]}. " +
+                "Разрешённые пути: "+JSON.stringify(assignment.allowedPaths||[]) + ". " +
+                "Для CSS используй только точечные edits find/replace, основанные на переданном контексте. " +
+                "Если действительно нечего менять, верни {\\"summary\\":\\"Изменения не требуются\\",\\"changes\\":[]} без пояснений. " +
+                "Не возвращай Markdown, комментарии или текст до/после JSON. " +
+                "\\n\\nПервый отклонённый ответ: "+diagnostic+
+                "\\n\\nВторой отклонённый ответ: "+retryRaw+
+                "\\n\\nКонтекст и задание:\\n"+userInstruction
+              );
+              if(!response.ok){const err=await response.text();throw new Error("OpenRouter North Mini Code: HTTP "+response.status+" при последней попытке формата — "+err.slice(0,300));}
+              payload=await response.json();
+              parsed=parseCohereChangesResponse(payload);
+              if(!parsed){
+                const finalRaw=extractCohereResponseText(payload).replace(/\\s+/g," ").slice(0,500)||"пустой ответ";
+                throw new Error("Cohere North Mini Code трижды вернула ответ без JSON-массива changes. Последний ответ: "+finalRaw);
+              }
             }
           }
           if(parsed.changes.length>6)throw new Error("North предложила изменить больше 6 файлов.");
