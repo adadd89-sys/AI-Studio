@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import worker, { assertWorkflowExecutionSucceeded, extractCohereResponseText, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, normalizeAgentAssignments, normalizeWorkflowTeamSettings, parseCohereChangesResponse } from "./core.js";
+import worker, { assertWorkflowExecutionSucceeded, extractCohereResponseText, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isDeveloperWritablePath, normalizeAgentAssignments, normalizeWorkflowTeamSettings, parseCohereChangesResponse } from "./core.js";
 
 const env = {
   APP_PASSWORD: "correct-horse",
@@ -78,6 +78,16 @@ describe("Cohere North response normalization", () => {
 });
 
 describe("Gemini developer delegation", () => {
+  it("only exposes source and runtime files as developer-writable paths", () => {
+    assert.equal(isDeveloperWritablePath("src/App.jsx"), true);
+    assert.equal(isDeveloperWritablePath("worker/core.js"), true);
+    assert.equal(isDeveloperWritablePath("index.html"), true);
+    assert.equal(isDeveloperWritablePath("README.md"), false);
+    assert.equal(isDeveloperWritablePath("package.json"), false);
+    assert.equal(isDeveloperWritablePath("package-lock.json"), false);
+    assert.equal(isDeveloperWritablePath("wrangler.toml"), false);
+  });
+
   it("requires a separate assignment for every enabled developer", () => {
     const assignments = [
       { agent: "qwen", task: "Implement the API", allowedPaths: ["worker/core.js"] }
@@ -881,6 +891,7 @@ describe("AI Studio Worker", () => {
     const cookie = await getSessionCookie();
     const writes = [];
     const requestedGeminiModels = [];
+    const assignmentRepairPrompts = [];
     globalThis.fetch = async (url, options = {}) => {
       const target = String(url);
       if (target.includes("generativelanguage.googleapis.com")) {
@@ -890,6 +901,7 @@ describe("AI Studio Worker", () => {
           return new Response(JSON.stringify({ error: { message: "Model overloaded" } }), { status: 503 });
         }
         const prompt = JSON.parse(options.body).contents?.[0]?.parts?.[0]?.text || "";
+        if (prompt.includes("Ты исправляешь только распределение задач")) assignmentRepairPrompts.push(prompt);
         const responseData = prompt.includes("Ты исправляешь только распределение задач")
           ? { assignments: [
               { agent: "qwen", task: "Обнови компонент приложения для экрана настроек", allowedPaths: ["src/App.jsx"] },
@@ -903,7 +915,7 @@ describe("AI Studio Worker", () => {
               questions: [],
               assignments: [
                 { agent: "qwen", task: "Создай компонент настроек", allowedPaths: ["src/new-screen.jsx"] },
-                { agent: "north", task: "Подготовь отдельный файл стилей", allowedPaths: ["src/missing-theme.css"] }
+                { agent: "north", task: "Обнови документацию", allowedPaths: ["README.md"] }
               ]
             };
         return new Response(JSON.stringify({
@@ -912,6 +924,7 @@ describe("AI Studio Worker", () => {
       }
       if (target.includes("/git/trees/") && target.includes("?recursive=1")) {
         return new Response(JSON.stringify({ tree: [
+          { path: "README.md", type: "blob" },
           { path: "src/App.jsx", type: "blob" },
           { path: "src/theme.css", type: "blob" }
         ] }), { status: 200 });
@@ -977,6 +990,13 @@ describe("AI Studio Worker", () => {
         "gemini-3.6-flash"
       ];
       assert.deepEqual(requestedGeminiModels, [...expectedFallbackSequence, ...expectedFallbackSequence]);
+      assert.equal(assignmentRepairPrompts.length, 2);
+      for (const prompt of assignmentRepairPrompts) {
+        assert.match(prompt, /Предыдущая ошибка проверки: Gemini назначил недопустимый путь файла для north: README\.md/);
+        const offeredPaths = prompt.split("Доступные для изменения файлы")[1].split(". Назначь")[0].split("\\n").slice(1).join("\\n");
+        assert.equal(offeredPaths.includes("README.md"), false);
+        assert.match(offeredPaths, /src\\/theme\\.css/);
+      }
       assert.match(result.branch, /^ai-studio\/task-/);
       assert.deepEqual(result.filesChanged.map(file => file.path).sort(), ["src/App.jsx", "src/theme.css"]);
       assert.match(result.gemmaReview, /Gemma: Изменения корректны\./);
