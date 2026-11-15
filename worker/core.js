@@ -60,7 +60,7 @@ export function buildAgentContextText(contextFiles) {
 export function createAgentFailureDiagnostic({ agent, model, filesReceived = [], error, upstreamStatus = null }) {
   const message = String(error?.message || error || "Неизвестная ошибка агента.")
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]")
-    .replace(/([?&]key=)[^&\s]+/gi, "$1[REDACTED]")
+    .replace(/(\\bkey=)[^&\s]+/gi, "$1[REDACTED]")
     .replace(/(["']?(?:api[_-]?key|authorization|token)["']?\s*:\s*["'])[^"']+/gi, "$1[REDACTED]")
     .slice(0, 1500);
   return {
@@ -1666,14 +1666,14 @@ function parseJsonObject(value) {
             })});
           }
           let response=await requestNorth(userInstruction+"\n\nВерни только JSON-объект. Для CSS/больших файлов НЕ переписывай весь файл: верни changes с точечными edits:[{find,replace}], где find — короткий точный уникальный фрагмент из переданного контекста, replace — его замена. Для небольших файлов можно вернуть полное content. Никакого текста вне JSON.");
-          if(!response.ok){const err=await response.text();throw new Error("OpenRouter North Mini Code: HTTP "+response.status+" — "+err.slice(0,300));}
+          if(!response.ok){const err=await response.text();const failure=new Error("OpenRouter North Mini Code: HTTP "+response.status+" — "+err.slice(0,300));failure.status=response.status;throw failure;}
           let payload=await response.json();
           let parsed=parseCohereChangesResponse(payload);
           if(!parsed){
             const raw=extractCohereResponseText(payload);
             const diagnostic=raw.replace(/\s+/g," ").slice(0,350)||"пустой ответ";
             response=await requestNorth(userInstruction+"\n\nФОРМАТНЫЙ ПОВТОР: верни валидный JSON без обратных слешей перед кавычками вне строк. Пример структуры: "+JSON.stringify({summary:"Краткое описание",changes:[{path:"src/styles.css",reason:"Причина",edits:[{find:"точный фрагмент исходного файла",replace:"новый фрагмент"}]}]})+". Для больших файлов обязательно edits, не полное содержимое. Если изменений не требуется, верни changes: []. Только JSON, без объяснений.");
-            if(!response.ok){const err=await response.text();throw new Error("OpenRouter North Mini Code: HTTP "+response.status+" при исправлении формата — "+err.slice(0,300));}
+            if(!response.ok){const err=await response.text();const failure=new Error("OpenRouter North Mini Code: HTTP "+response.status+" при исправлении формата — "+err.slice(0,300));failure.status=response.status;throw failure;}
             payload=await response.json();
             parsed=parseCohereChangesResponse(payload);
             if(!parsed){
@@ -1692,7 +1692,7 @@ function parseJsonObject(value) {
                 "\n\nВторой отклонённый ответ: "+retryRaw+
                 "\n\nКонтекст и задание:\n"+userInstruction
               );
-              if(!response.ok){const err=await response.text();throw new Error("OpenRouter North Mini Code: HTTP "+response.status+" при последней попытке формата — "+err.slice(0,300));}
+              if(!response.ok){const err=await response.text();const failure=new Error("OpenRouter North Mini Code: HTTP "+response.status+" при последней попытке формата — "+err.slice(0,300));failure.status=response.status;throw failure;}
               payload=await response.json();
               parsed=parseCohereChangesResponse(payload);
               if(!parsed){
@@ -1945,7 +1945,7 @@ function parseJsonObject(value) {
           north: teamSettings.agents.north ? (failedAgent === "north" ? "Ошибка или прервано" : usage.agents.includes("north") ? "Завершил" : "Пропущен") : "Отключён"
         });
         return json({
-          error: error?.message || "Не удалось выполнить задачу командой ИИ.",
+          error: failedAgent ? usage.agentResults.at(-1)?.error : (error?.message || "Не удалось выполнить задачу командой ИИ."),
           agentsUsed: usage.agents,
           usage: { requests: usage.requests, neurons: null, agentResults: usage.agentResults },
           stage: executionStage,
