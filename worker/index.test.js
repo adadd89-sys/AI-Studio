@@ -971,11 +971,12 @@ describe("AI Studio Worker", () => {
       assert.equal(result.model, "gemini-3.6-flash");
       assert.equal(result.primaryModel, "gemini-4-hydrogen");
       assert.equal(result.fallbackUsed, true);
-      assert.deepEqual(requestedGeminiModels, [
+      const expectedFallbackSequence = [
         "gemini-4-hydrogen", "gemini-4-hydrogen", "gemini-4-hydrogen",
         "gemini-3.8-flash", "gemini-3.8-flash", "gemini-3.8-flash",
-        "gemini-3.6-flash", "gemini-3.6-flash"
-      ]);
+        "gemini-3.6-flash"
+      ];
+      assert.deepEqual(requestedGeminiModels, [...expectedFallbackSequence, ...expectedFallbackSequence]);
       assert.match(result.branch, /^ai-studio\/task-/);
       assert.deepEqual(result.filesChanged.map(file => file.path).sort(), ["src/App.jsx", "src/theme.css"]);
       assert.match(result.gemmaReview, /Gemma: Изменения корректны\./);
