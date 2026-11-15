@@ -139,12 +139,23 @@ export function normalizeGeminiPlan(rawPlan) {
     }).filter(Boolean);
   }
   if (!summary && !steps.length) return null;
+  const rawAssignments = Array.isArray(plan.assignments) ? plan.assignments :
+    Array.isArray(plan.tasks) ? plan.tasks : [];
+  const assignments = rawAssignments.map(item => {
+    if (!item || typeof item !== "object") return item;
+    const agent = typeof item.agent === "string" ? item.agent.toLowerCase() : item.agent;
+    return {
+      ...item,
+      agent,
+      task: item.task || item.description || item.instruction || item.title,
+      allowedPaths: item.allowedPaths || item.files || item.paths
+    };
+  });
   return {
     ...plan,
     summary: summary ? summary.trim() : "План выполнения задачи сформирован Gemini",
     steps: steps.filter(step => typeof step === "string" && step.trim()).map(step => step.trim()).slice(0, 20),
-    assignments: Array.isArray(plan.assignments) ? plan.assignments :
-      Array.isArray(plan.tasks) ? plan.tasks : plan.assignments
+    assignments
   };
 }
 
