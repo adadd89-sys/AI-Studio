@@ -244,6 +244,7 @@ function App() {
     try { return JSON.parse(localStorage.getItem('ai-studio-tasks') || '[]').slice(0, 100); } catch { return []; }
   });
   const pollingJobs = useRef(new Set());
+  const tasksRef = useRef(tasks);
   const buttonAudioRef = useRef(null);
   const [projects, setProjects] = useState([]);
   const [selectedProjectId, setSelectedProjectId] = useState('');
@@ -500,10 +501,14 @@ function App() {
   }, [authState]);
 
   useEffect(() => {
+    tasksRef.current = tasks;
+  }, [tasks]);
+
+  useEffect(() => {
     if (authState !== 'authenticated') return;
     let cancelled = false;
     async function refreshPendingTasks() {
-      const pending = tasks.filter(item => item.jobId && ['queued', 'running'].includes(item.state));
+      const pending = tasksRef.current.filter(item => item.jobId && ['queued', 'running'].includes(item.state));
       for (const item of pending) {
         if (cancelled || pollingJobs.current.has(item.jobId)) continue;
         pollingJobs.current.add(item.jobId);
@@ -544,7 +549,7 @@ function App() {
     refreshPendingTasks();
     const timer = setInterval(refreshPendingTasks, 10000);
     return () => { cancelled = true; clearInterval(timer); };
-  }, [authState, tasks]);
+  }, [authState]);
 
   useEffect(() => {
     localStorage.setItem('ai-studio-usage-events', JSON.stringify(usageEvents.slice(0, 300)));
