@@ -1302,7 +1302,7 @@ export default {
       }
       try {
         executionStage = "github_context";
-        await publishTaskProgress("github_context", "Изучение контекста GitHub", { gemini: teamSettings.agents.gemini ? "Завершил план" : "Пропущен" });
+        await publishTaskProgress("github_context", "Изучение контекста GitHub", { gemini: teamSettings.agents.gemini ? "Изучает репозиторий" : "Пропущен" });
         const mainRef = await githubRequest(env, "/repos/" + GITHUB_REPO + "/git/ref/heads/main");
         const tree = await githubRequest(env, "/repos/" + GITHUB_REPO + "/git/trees/" + mainRef.object.sha + "?recursive=1");
         const repoFiles = (tree.tree || []).filter(item => item.type === "blob").map(item => item.path).slice(0, 120);
