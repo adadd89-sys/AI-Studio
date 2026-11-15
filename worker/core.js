@@ -1926,13 +1926,15 @@ function parseJsonObject(value) {
 // Compare serialized task snapshots before persisting status changes to KV.
 export function finalizeWorkflowAgentStatuses(agents = {}, state, agentsUsed = []) {
   const used = new Set(Array.isArray(agentsUsed) ? agentsUsed : []);
-  const activeStatuses = new Set(["Изучает репозиторий", "Работает", "Передал задания", "Исправляет распределение", "Результат принят"]);
+  const activeStatuses = new Set(["Изучает репозиторий", "Работает", "Передал задания", "Исправляет распределение"]);
+  const completedStatuses = new Set(["Завершил", "Завершил проверку", "Результат принят"]);
   const finalized = { ...agents };
   for (const [key, value] of Object.entries(finalized)) {
     if (value === "Отключён" || value === "Пропущен") continue;
     if (state === "complete") {
       finalized[key] = used.has(key) ? "Завершил" : "Пропущен";
     } else if (state === "failed") {
+      if (completedStatuses.has(value)) continue;
       finalized[key] = used.has(key) || activeStatuses.has(value) ? "Ошибка или прервано" : "Пропущен";
     }
   }

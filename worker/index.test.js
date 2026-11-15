@@ -1449,6 +1449,25 @@ describe("AI Studio Worker", () => {
     });
   });
 
+  it("preserves agents that completed their work before a later workflow failure", () => {
+    const agents = {
+      gemini: "Работает",
+      qwen: "Завершил",
+      north: "Результат принят",
+      gemma: "Завершил проверку",
+      gemini38: "Ожидает",
+      gemini36: "Отключён"
+    };
+    assert.deepEqual(finalizeWorkflowAgentStatuses(agents, "failed", []), {
+      gemini: "Ошибка или прервано",
+      qwen: "Завершил",
+      north: "Результат принят",
+      gemma: "Завершил проверку",
+      gemini38: "Пропущен",
+      gemini36: "Отключён"
+    });
+  });
+
   it("detects task snapshot changes before writing to KV", () => {
     const queued = { jobId: "job-1", state: "queued", status: "В очереди" };
     const unchanged = { jobId: "job-1", state: "queued", status: "В очереди" };
