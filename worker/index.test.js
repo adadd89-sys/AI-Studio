@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import worker, { assertWorkflowExecutionSucceeded, extractCohereResponseText, extractQwenResponseText, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isDeveloperWritablePath, normalizeAgentAssignments, normalizeGeminiPlan, normalizeWorkflowTeamSettings, parseCohereChangesResponse, applyCohereTextEdits } from "./core.js";
+import worker, { assertWorkflowExecutionSucceeded, extractCohereResponseText, extractQwenResponseText, parseQwenChangesResponse, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isDeveloperWritablePath, normalizeAgentAssignments, normalizeGeminiPlan, normalizeWorkflowTeamSettings, parseCohereChangesResponse, applyCohereTextEdits } from "./core.js";
 
 const env = {
   APP_PASSWORD: "correct-horse",
@@ -63,6 +63,15 @@ describe("Qwen response normalization", () => {
   it("supports multipart Qwen assistant content", () => {
     const payload = { choices: [{ message: { content: [{ type: "text", text: '{"summary":"ok","changes":[]}' }] } }] };
     assert.equal(extractQwenResponseText(payload), '{"summary":"ok","changes":[]}');
+  });
+  it("parses fenced and nested Qwen changes responses", () => {
+    const fenced = "Here is the result:\n" + String.fromCharCode(96,96,96) + "json\n" + JSON.stringify({ summary: "ok", changes: [{ path: "src/App.jsx", content: "x" }] }) + "\n" + String.fromCharCode(96,96,96);
+    assert.equal(parseQwenChangesResponse(fenced).changes[0].path, "src/App.jsx");
+    const nested = JSON.stringify({ result: { files: [{ path: "src/styles.css", content: ".team-card{}" }] } });
+    assert.equal(parseQwenChangesResponse(nested).changes[0].path, "src/styles.css");
+  });
+  it("rejects ordinary Qwen text without file changes", () => {
+    assert.equal(parseQwenChangesResponse("I can help with that, but here is a plan."), null);
   });
 });
 
