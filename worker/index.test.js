@@ -1594,8 +1594,8 @@ describe("AI Studio Worker", () => {
 
   it("shows successful agent diagnostics after a completed workflow", () => {
     const source = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
-    const successStart = source.indexOf("const actualAgents = Array.isArray(data.agentsUsed)");
-    const successEnd = source.indexOf("setExecutionResult(data);", successStart);
+    const successStart = source.indexOf("if (!completed)");
+    const successEnd = source.indexOf("const actualAgents = Array.isArray(data.agentsUsed)", successStart);
     assert.ok(successStart >= 0 && successEnd > successStart);
     const successHandler = source.slice(successStart, successEnd);
     assert.match(successHandler, /setAgentExecutionDetails\(data\.usage\?\.agentResults\)/);
