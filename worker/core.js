@@ -1755,7 +1755,7 @@ function parseJsonObject(value) {
           await publishTaskProgress("complete", "Задача завершена · изменения файлов не потребовались", {
             gemini: teamSettings.agents.gemini ? "Завершил" : "Пропущен",
             qwen: teamSettings.agents.qwen ? "Завершил" : "Отключён",
-            north: teamSettings.agents.north ? "Завершил" : "Отключён"
+            north: teamSettings.agents.north ? (teamSettings.agents.qwen ? "Проверка не потребовалась" : "Завершил разработку") : "Отключён"
           });
           return json({ ok: true, task, plan, summary: implementation.summary || plan.summary,
             model: planResult.model, primaryModel, fallbackUsed: planResult.fallbackUsed,
@@ -1967,7 +1967,7 @@ function parseJsonObject(value) {
         await publishTaskProgress("complete", "Задача завершена · результаты сохранены", {
           gemini: teamSettings.agents.gemini ? "Завершил" : "Пропущен",
           qwen: teamSettings.agents.qwen ? "Завершил" : "Отключён",
-          north: teamSettings.agents.north ? "Завершил" : "Отключён"
+          north: teamSettings.agents.north ? (teamSettings.agents.qwen ? (review.reviewFailures?.some(item => item.agent === "north") ? "Ошибка ревью" : "Завершил проверку") : "Завершил разработку") : "Отключён"
         });
         return json({ ok: true, task, plan, delegation, pullRequest, pullRequestError, summary: implementation.summary || plan.summary,
           model: planResult.model, primaryModel, fallbackUsed: planResult.fallbackUsed,
