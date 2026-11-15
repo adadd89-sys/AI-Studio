@@ -89,16 +89,16 @@ describe("Workers AI timeout recovery", () => {
     assert.equal(isWorkersAITimeoutError(new Error("AiError: Request timeout")), true);
     assert.equal(isWorkersAITimeoutError(new Error("Invalid model")), false);
   });
-  it("retries a Workers AI 3046 once and returns the successful response", async () => {
+  it("retries a Workers AI 3046 and returns the successful response", async () => {
     let calls = 0;
     const ai = { run: async () => {
       calls++;
-      if (calls === 1) throw Object.assign(new Error("Request timeout"), { internalCode: 3046 });
+      if (calls < 3) throw Object.assign(new Error("Request timeout"), { internalCode: 3046 });
       return { response: "ok" };
     } };
     const result = await runWorkersAIWithRetry(ai, "@cf/qwen/qwen3.8-27b", {}, { wait: async () => {} });
     assert.equal(result.response, "ok");
-    assert.equal(calls, 2);
+    assert.equal(calls, 3);
   });
   it("returns a clear 3046 error after the retry is exhausted", async () => {
     let calls = 0;
@@ -108,9 +108,9 @@ describe("Workers AI timeout recovery", () => {
     } };
     await assert.rejects(
       runWorkersAIWithRetry(ai, "@cf/qwen/qwen3.8-27b", {}, { wait: async () => {} }),
-      error => error.code === 3046 && /после 2 попыток/.test(error.message)
+      error => error.code === 3046 && /после 3 попыток/.test(error.message)
     );
-    assert.equal(calls, 2);
+    assert.equal(calls, 3);
   });
 });
 
