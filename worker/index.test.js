@@ -149,6 +149,11 @@ describe("Qwen response normalization", () => {
     const payload = { choices: [{ message: { content: [{ type: "text", text: '{"summary":"ok","changes":[]}' }] } }] };
     assert.equal(extractQwenResponseText(payload), '{"summary":"ok","changes":[]}');
   });
+  it("ignores delta reasoning as a Qwen implementation payload", () => {
+    const payload = { choices: [{ delta: { content: null, reasoning_content: '{"changes":[]}' } }] };
+    assert.equal(extractQwenResponseText(payload), "");
+    assert.equal(parseQwenChangesResponse(payload), null);
+  });
   it("does not mistake Qwen reasoning fields for the final implementation response", () => {
     const payload = { choices: [{ message: { content: null, reasoning_content: '{"changes":[{"path":"src/App.jsx","content":"not-final"}]}' } }] };
     assert.equal(extractQwenResponseText(payload), "");
