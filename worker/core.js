@@ -16,7 +16,6 @@ const candidates = [
   message?.tool_calls?.[0]?.function?.arguments,
   message?.function_call?.arguments,
   result?.choices?.[0]?.delta?.content,
-  result?.choices?.[0]?.delta?.reasoning_content,
   result?.response,
   result?.generated_text,
   result?.output_text,
@@ -1647,7 +1646,7 @@ function parseJsonObject(value) {
             const firstRaw = modelText(result).replace(/\s+/g, " ").slice(0, 350) || "пустой ответ";
             result = await requestQwen("ФОРМАТНЫЙ ПОВТОР. Верни только JSON с полями summary и changes: " + JSON.stringify({ summary: "Изменения", changes: [{ path: (assignment.allowedPaths || [])[0] || "src/App.jsx", content: "ПОЛНОЕ СОДЕРЖИМОЕ ФАЙЛА" }] }) + ". Используй только разрешённые пути " + JSON.stringify(assignment.allowedPaths || []) + ". Задача: " + task + ". ТЗ: " + assignment.task + ". Контекст: " + scopedContextText + ". Предыдущий ответ: " + firstRaw);
             parsed = parseQwenChangesResponse(result);
-            if (!parsed) { const retryRaw = modelText(result).replace(/\s+/g, " ").slice(0, 350) || "пустой ответ"; throw Object.assign(new Error("Qwen дважды вернул ответ без JSON-массива changes. Первый ответ: " + firstRaw + "; повтор: " + retryRaw), { code: "QWEN_INVALID_JSON", agent: "qwen", agentStage: "qwen_implementation" }); }
+            if (!parsed) { const retryRaw = modelText(result).replace(/\s+/g, " ").slice(0, 350) || "пустой ответ"; throw Object.assign(new Error("Qwen дважды вернул ответ без JSON-массива changes. Первый ответ: " + firstRaw + "; повтор: " + retryRaw), { code: "QWEN_INVALID_JSON", agent: "qwen", agentStage: executionStage }); }
           }
           if (parsed.changes.length > 6) throw new Error("Qwen предложил изменить больше 6 файлов.");
           for (const change of parsed.changes) {
@@ -1968,7 +1967,7 @@ function parseJsonObject(value) {
 
         executionStage = "github_save";
         await publishTaskProgress("github_save", "Сохранение проверенных изменений в GitHub", {
-          qwen: teamSettings.agents.qwen ? (qwenFallbackUsed ? "Тайм-аут · резерв North" : "Результат принят") : "Отключён",
+          qwen: teamSettings.agents.qwen ? (qwenFallbackUsed ? (qwenFallbackReason === "invalid_json" ? "Некорректный JSON · резерв North" : "Тайм-аут · резерв North") : "Результат принят") : "Отключён",
           north: teamSettings.agents.north ? "Результат принят" : "Отключён"
         });
         const branch = "ai-studio/task-" + Date.now().toString(36);
@@ -2019,8 +2018,8 @@ function parseJsonObject(value) {
           qwenModel, gemmaModel, branch, filesChanged: changed, agentsUsed: usage.agents,
           usage: { requests: usage.requests, neurons: null, agentResults: usage.agentResults },
           reviewers: review.reviewers || [],
-          fallback: qwenFallbackUsed ? { from: "qwen", to: "north", reason: "Cloudflare Workers AI timeout (3046)" } : null,
-          qwenReview: qwenFallbackUsed ? "Qwen завершился тайм-аутом; реализацию выполнила Cohere North Mini Code." : teamSettings.agents.qwen ? "Изменения подготовлены Qwen." : "Изменения подготовлены Cohere North Mini Code.",
+          fallback: qwenFallbackUsed ? { from: "qwen", to: "north", reason: qwenFallbackReason === "invalid_json" ? "Qwen returned invalid JSON twice (missing changes array)" : "Cloudflare Workers AI timeout (3046)" } : null,
+          qwenReview: qwenFallbackUsed ? (qwenFallbackReason === "invalid_json" ? "Qwen дважды вернул некорректный JSON; реализацию выполнила Cohere North Mini Code." : "Qwen завершился тайм-аутом; реализацию выполнила Cohere North Mini Code.") : teamSettings.agents.qwen ? "Изменения подготовлены Qwen." : "Изменения подготовлены Cohere North Mini Code.",
           gemmaReview: deepReview ? (review.summary || (review.issues.length ? review.issues.join("\n") : "Изменения одобрены.")) : "Ревью пропущено согласно интенсивности.",
           reviewIssues: review.issues, northReview: review.northReview, repairAttempted });
       } catch (error) {
