@@ -15,8 +15,6 @@ const candidates = [
   result?.choices?.[0]?.text,
   message?.tool_calls?.[0]?.function?.arguments,
   message?.function_call?.arguments,
-  message?.reasoning_content,
-  message?.reasoning,
   result?.choices?.[0]?.delta?.content,
   result?.choices?.[0]?.delta?.reasoning_content,
   result?.response,
@@ -38,7 +36,9 @@ return "";
 }
 export function extractCohereResponseText(payload) {
   const message = payload?.choices?.[0]?.message;
-  const candidates = [message?.content,message?.tool_calls?.[0]?.function?.arguments,message?.function_call?.arguments,payload?.choices?.[0]?.text,message?.reasoning_content,message?.reasoning,payload?.output_text,payload?.response,payload?.generated_text];
+  // Never treat private model reasoning as an actionable implementation response.
+  // Only final assistant content / tool arguments may be parsed as a changes payload.
+  const candidates = [message?.content,message?.tool_calls?.[0]?.function?.arguments,message?.function_call?.arguments,payload?.choices?.[0]?.text,payload?.output_text,payload?.response,payload?.generated_text];
   for (const candidate of candidates) {
     if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
     if (Array.isArray(candidate)) {
