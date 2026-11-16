@@ -149,6 +149,11 @@ describe("Qwen response normalization", () => {
     const payload = { choices: [{ message: { content: [{ type: "text", text: '{"summary":"ok","changes":[]}' }] } }] };
     assert.equal(extractQwenResponseText(payload), '{"summary":"ok","changes":[]}');
   });
+  it("does not mistake Qwen reasoning fields for the final implementation response", () => {
+    const payload = { choices: [{ message: { content: null, reasoning_content: '{"changes":[{"path":"src/App.jsx","content":"not-final"}]}' } }] };
+    assert.equal(extractQwenResponseText(payload), "");
+    assert.equal(parseQwenChangesResponse(payload), null);
+  });
   it("parses fenced and nested Qwen changes responses", () => {
     const fenced = "Here is the result:\n" + String.fromCharCode(96,96,96) + "json\n" + JSON.stringify({ summary: "ok", changes: [{ path: "src/App.jsx", content: "x" }] }) + "\n" + String.fromCharCode(96,96,96);
     assert.equal(parseQwenChangesResponse(fenced).changes[0].path, "src/App.jsx");
@@ -176,6 +181,11 @@ describe("Cohere North patch application", () => {
 });
 
 describe("Cohere North response normalization", () => {
+  it("does not mistake North reasoning fields for the final implementation response", () => {
+    const p = { choices: [{ message: { content: null, reasoning: '{"changes":[{"path":"src/App.jsx","content":"not-final"}]}' } }] };
+    assert.equal(extractCohereResponseText(p), "");
+    assert.equal(parseCohereChangesResponse(p), null);
+  });
   it("parses valid OpenRouter JSON content", () => {
     const p={choices:[{message:{content:'{"changes":[{"path":"src/App.jsx","content":"x"}]}'}}]};
     assert.equal(parseCohereChangesResponse(p).changes[0].path,"src/App.jsx");
