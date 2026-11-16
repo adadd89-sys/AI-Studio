@@ -15,10 +15,7 @@ const candidates = [
   result?.choices?.[0]?.text,
   message?.tool_calls?.[0]?.function?.arguments,
   message?.function_call?.arguments,
-  message?.reasoning_content,
-  message?.reasoning,
   result?.choices?.[0]?.delta?.content,
-  result?.choices?.[0]?.delta?.reasoning_content,
   result?.response,
   result?.generated_text,
   result?.output_text,
@@ -38,7 +35,9 @@ return "";
 }
 export function extractCohereResponseText(payload) {
   const message = payload?.choices?.[0]?.message;
-  const candidates = [message?.content,message?.tool_calls?.[0]?.function?.arguments,message?.function_call?.arguments,payload?.choices?.[0]?.text,message?.reasoning_content,message?.reasoning,payload?.output_text,payload?.response,payload?.generated_text];
+  // Never treat private model reasoning as an actionable implementation response.
+  // Only final assistant content / tool arguments may be parsed as a changes payload.
+  const candidates = [message?.content,message?.tool_calls?.[0]?.function?.arguments,message?.function_call?.arguments,payload?.choices?.[0]?.text,payload?.output_text,payload?.response,payload?.generated_text];
   for (const candidate of candidates) {
     if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
     if (Array.isArray(candidate)) {
@@ -281,6 +280,10 @@ export function isWorkersAITimeoutError(error) {
 
 export function shouldFallbackQwenToNorth(error, { northEnabled = false, apiKeyAvailable = false } = {}) {
   return northEnabled === true && apiKeyAvailable === true && isWorkersAITimeoutError(error);
+}
+
+export function shouldFallbackQwenFormatToNorth(error, { northEnabled = false, apiKeyAvailable = false } = {}) {
+  return northEnabled === true && apiKeyAvailable === true && error?.code === "QWEN_INVALID_JSON";
 }
 
 export async function runWorkersAIWithRetry(ai, model, input, options = {}) {
@@ -1628,6 +1631,7 @@ function parseJsonObject(value) {
           "\n\nДерево файлов:\n" + repoFiles.join("\n");
         const planText = JSON.stringify(plan);
         let qwenFallbackUsed = false;
+        let qwenFallbackReason = null;
         async function askQwen(assignment, feedback = "") {
           executionStage = feedback ? "qwen_repair" : "qwen_implementation";
           const scopedContextText = "Контекст файлов только для чтения (allowedPaths ограничивает запись, а не чтение):\n" + buildAgentContextText(contextFiles);
@@ -1642,7 +1646,7 @@ function parseJsonObject(value) {
             const firstRaw = modelText(result).replace(/\s+/g, " ").slice(0, 350) || "пустой ответ";
             result = await requestQwen("ФОРМАТНЫЙ ПОВТОР. Верни только JSON с полями summary и changes: " + JSON.stringify({ summary: "Изменения", changes: [{ path: (assignment.allowedPaths || [])[0] || "src/App.jsx", content: "ПОЛНОЕ СОДЕРЖИМОЕ ФАЙЛА" }] }) + ". Используй только разрешённые пути " + JSON.stringify(assignment.allowedPaths || []) + ". Задача: " + task + ". ТЗ: " + assignment.task + ". Контекст: " + scopedContextText + ". Предыдущий ответ: " + firstRaw);
             parsed = parseQwenChangesResponse(result);
-            if (!parsed) { const retryRaw = modelText(result).replace(/\s+/g, " ").slice(0, 350) || "пустой ответ"; throw new Error("Qwen дважды вернул ответ без JSON-массива changes. Первый ответ: " + firstRaw + "; повтор: " + retryRaw); }
+            if (!parsed) { const retryRaw = modelText(result).replace(/\s+/g, " ").slice(0, 350) || "пустой ответ"; throw Object.assign(new Error("Qwen дважды вернул ответ без JSON-массива changes. Первый ответ: " + firstRaw + "; повтор: " + retryRaw), { code: "QWEN_INVALID_JSON", agent: "qwen", agentStage: executionStage }); }
           }
           if (parsed.changes.length > 6) throw new Error("Qwen предложил изменить больше 6 файлов.");
           for (const change of parsed.changes) {
@@ -1732,19 +1736,27 @@ function parseJsonObject(value) {
           try {
             return await askQwen(assignment, feedback);
           } catch (error) {
-            if (!shouldFallbackQwenToNorth(error, {
+            const fallbackOptions = {
               northEnabled: teamSettings.agents.north,
               apiKeyAvailable: Boolean(env.OPENROUTER_API_KEY)
-            })) throw error;
+            };
+            const timeoutFallback = shouldFallbackQwenToNorth(error, fallbackOptions);
+            const formatFallback = shouldFallbackQwenFormatToNorth(error, fallbackOptions);
+            if (!timeoutFallback && !formatFallback) throw error;
             qwenFallbackUsed = true;
+            qwenFallbackReason = formatFallback ? "invalid_json" : "timeout";
             const diagnostic = createAgentFailureDiagnostic({
               agent: "qwen", model: qwenModel, filesReceived: contextFiles.map(file => file.path), error
             });
             diagnostic.transport = "Cloudflare Workers AI binding";
-            diagnostic.providerStatus = "timeout";
+            diagnostic.providerStatus = formatFallback ? "invalid_response" : "timeout";
+            diagnostic.fallbackReason = qwenFallbackReason;
             usage.agentResults.push(diagnostic);
-            await publishTaskProgress("qwen_fallback", "Qwen не ответил — задача передана резервному агенту North", {
-              qwen: "Тайм-аут · резерв включён",
+            const progressMessage = formatFallback
+              ? "Qwen дважды вернул некорректный JSON — задача передана резервному агенту North"
+              : "Qwen не ответил — задача передана резервному агенту North";
+            await publishTaskProgress("qwen_fallback", progressMessage, {
+              qwen: formatFallback ? "Некорректный JSON · резерв включён" : "Тайм-аут · резерв включён",
               north: "Резервная разработка"
             });
             return askNorth(assignment, feedback);
@@ -1769,7 +1781,7 @@ function parseJsonObject(value) {
             task: assignment.task, allowedPaths: assignment.allowedPaths, summary: result.summary || "", changes: result.changes };
         }));
         await publishTaskProgress("development_complete", "Разработчики передали результаты", {
-          qwen: teamSettings.agents.qwen ? (qwenFallbackUsed ? "Тайм-аут · передал задачу North" : "Завершил разработку") : "Отключён",
+          qwen: teamSettings.agents.qwen ? (qwenFallbackUsed ? (qwenFallbackReason === "invalid_json" ? "Некорректный JSON · передал задачу North" : "Тайм-аут · передал задачу North") : "Завершил разработку") : "Отключён",
           north: teamSettings.agents.north ? (qwenFallbackUsed || !teamSettings.agents.qwen ? "Завершил резервную разработку" : "Ожидает независимого ревью") : "Отключён"
         });
         const mergedChanges = [];
@@ -1786,7 +1798,7 @@ function parseJsonObject(value) {
         if (!implementation.changes.length) {
           await publishTaskProgress("complete", "Задача завершена · изменения файлов не потребовались", {
             gemini: teamSettings.agents.gemini ? "Завершил" : "Пропущен",
-            qwen: teamSettings.agents.qwen ? (qwenFallbackUsed ? "Тайм-аут · резерв North" : "Завершил") : "Отключён",
+            qwen: teamSettings.agents.qwen ? (qwenFallbackUsed ? (qwenFallbackReason === "invalid_json" ? "Некорректный JSON · резерв North" : "Тайм-аут · резерв North") : "Завершил") : "Отключён",
             north: teamSettings.agents.north ? (qwenFallbackUsed || !teamSettings.agents.qwen ? "Резервная разработка завершена" : "Проверка не потребовалась") : "Отключён"
           });
           return json({ ok: true, task, plan, summary: implementation.summary || plan.summary,
@@ -1955,7 +1967,7 @@ function parseJsonObject(value) {
 
         executionStage = "github_save";
         await publishTaskProgress("github_save", "Сохранение проверенных изменений в GitHub", {
-          qwen: teamSettings.agents.qwen ? (qwenFallbackUsed ? "Тайм-аут · резерв North" : "Результат принят") : "Отключён",
+          qwen: teamSettings.agents.qwen ? (qwenFallbackUsed ? (qwenFallbackReason === "invalid_json" ? "Некорректный JSON · резерв North" : "Тайм-аут · резерв North") : "Результат принят") : "Отключён",
           north: teamSettings.agents.north ? "Результат принят" : "Отключён"
         });
         const branch = "ai-studio/task-" + Date.now().toString(36);
@@ -1998,7 +2010,7 @@ function parseJsonObject(value) {
         } catch (prError) { pullRequestError = prError?.message || "Не удалось открыть Pull Request."; }
         await publishTaskProgress("complete", "Задача завершена · результаты сохранены", {
           gemini: teamSettings.agents.gemini ? "Завершил" : "Пропущен",
-          qwen: teamSettings.agents.qwen ? (qwenFallbackUsed ? "Тайм-аут · резерв North" : "Завершил") : "Отключён",
+          qwen: teamSettings.agents.qwen ? (qwenFallbackUsed ? (qwenFallbackReason === "invalid_json" ? "Некорректный JSON · резерв North" : "Тайм-аут · резерв North") : "Завершил") : "Отключён",
           north: teamSettings.agents.north ? (qwenFallbackUsed || !teamSettings.agents.qwen ? "Завершил резервную разработку" : (review.reviewFailures?.some(item => item.agent === "north") ? "Ошибка ревью" : "Завершил проверку")) : "Отключён"
         });
         return json({ ok: true, task, plan, delegation, pullRequest, pullRequestError, summary: implementation.summary || plan.summary,
@@ -2006,8 +2018,8 @@ function parseJsonObject(value) {
           qwenModel, gemmaModel, branch, filesChanged: changed, agentsUsed: usage.agents,
           usage: { requests: usage.requests, neurons: null, agentResults: usage.agentResults },
           reviewers: review.reviewers || [],
-          fallback: qwenFallbackUsed ? { from: "qwen", to: "north", reason: "Cloudflare Workers AI timeout (3046)" } : null,
-          qwenReview: qwenFallbackUsed ? "Qwen завершился тайм-аутом; реализацию выполнила Cohere North Mini Code." : teamSettings.agents.qwen ? "Изменения подготовлены Qwen." : "Изменения подготовлены Cohere North Mini Code.",
+          fallback: qwenFallbackUsed ? { from: "qwen", to: "north", reason: qwenFallbackReason === "invalid_json" ? "Qwen returned invalid JSON twice (missing changes array)" : "Cloudflare Workers AI timeout (3046)" } : null,
+          qwenReview: qwenFallbackUsed ? (qwenFallbackReason === "invalid_json" ? "Qwen дважды вернул некорректный JSON; реализацию выполнила Cohere North Mini Code." : "Qwen завершился тайм-аутом; реализацию выполнила Cohere North Mini Code.") : teamSettings.agents.qwen ? "Изменения подготовлены Qwen." : "Изменения подготовлены Cohere North Mini Code.",
           gemmaReview: deepReview ? (review.summary || (review.issues.length ? review.issues.join("\n") : "Изменения одобрены.")) : "Ревью пропущено согласно интенсивности.",
           reviewIssues: review.issues, northReview: review.northReview, repairAttempted });
       } catch (error) {

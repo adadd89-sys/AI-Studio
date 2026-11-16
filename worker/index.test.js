@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import worker, { WORKFLOW_STEP_TIMEOUT, assertWorkflowExecutionSucceeded, finalizeWorkflowAgentStatuses, extractCohereResponseText, extractQwenResponseText, parseQwenChangesResponse, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isDeveloperWritablePath, normalizeAgentAssignments, normalizeGeminiPlan, normalizeWorkflowTeamSettings, parseCohereChangesResponse, normalizeCreatedPullRequest, buildAgentContextText, applyCohereTextEdits, isWorkersAITimeoutError, shouldFallbackQwenToNorth, runWorkersAIWithRetry } from "./core.js";
+import worker, { WORKFLOW_STEP_TIMEOUT, assertWorkflowExecutionSucceeded, finalizeWorkflowAgentStatuses, extractCohereResponseText, extractQwenResponseText, parseQwenChangesResponse, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isDeveloperWritablePath, normalizeAgentAssignments, normalizeGeminiPlan, normalizeWorkflowTeamSettings, parseCohereChangesResponse, normalizeCreatedPullRequest, buildAgentContextText, applyCohereTextEdits, isWorkersAITimeoutError, shouldFallbackQwenToNorth, shouldFallbackQwenFormatToNorth, runWorkersAIWithRetry } from "./core.js";
 
 const env = {
   APP_PASSWORD: "correct-horse",
@@ -98,6 +98,16 @@ describe("Workers AI timeout recovery", () => {
     assert.equal(shouldFallbackQwenToNorth(ordinary, { northEnabled: true, apiKeyAvailable: true }), false);
   });
 
+  it("uses North as a fallback after Qwen returns malformed JSON twice, only when North is enabled and configured", () => {
+    const invalidJson = Object.assign(new Error("Qwen дважды вернул ответ без JSON-массива changes."), { code: "QWEN_INVALID_JSON" });
+    const ordinary = new Error("Invalid request");
+    assert.equal(shouldFallbackQwenFormatToNorth(invalidJson, { northEnabled: true, apiKeyAvailable: true }), true);
+    assert.equal(shouldFallbackQwenFormatToNorth(invalidJson, { northEnabled: false, apiKeyAvailable: true }), false);
+    assert.equal(shouldFallbackQwenFormatToNorth(invalidJson, { northEnabled: true, apiKeyAvailable: false }), false);
+    assert.equal(shouldFallbackQwenFormatToNorth(ordinary, { northEnabled: true, apiKeyAvailable: true }), false);
+    assert.equal(shouldFallbackQwenToNorth(invalidJson, { northEnabled: true, apiKeyAvailable: true }), false);
+  });
+
   it("retries a Workers AI 3046 and returns the successful response", async () => {
     let calls = 0;
     const ai = { run: async () => {
@@ -139,6 +149,16 @@ describe("Qwen response normalization", () => {
     const payload = { choices: [{ message: { content: [{ type: "text", text: '{"summary":"ok","changes":[]}' }] } }] };
     assert.equal(extractQwenResponseText(payload), '{"summary":"ok","changes":[]}');
   });
+  it("ignores delta reasoning as a Qwen implementation payload", () => {
+    const payload = { choices: [{ delta: { content: null, reasoning_content: '{"changes":[]}' } }] };
+    assert.equal(extractQwenResponseText(payload), "");
+    assert.equal(parseQwenChangesResponse(payload), null);
+  });
+  it("does not mistake Qwen reasoning fields for the final implementation response", () => {
+    const payload = { choices: [{ message: { content: null, reasoning_content: '{"changes":[{"path":"src/App.jsx","content":"not-final"}]}' } }] };
+    assert.equal(extractQwenResponseText(payload), "");
+    assert.equal(parseQwenChangesResponse(payload), null);
+  });
   it("parses fenced and nested Qwen changes responses", () => {
     const fenced = "Here is the result:\n" + String.fromCharCode(96,96,96) + "json\n" + JSON.stringify({ summary: "ok", changes: [{ path: "src/App.jsx", content: "x" }] }) + "\n" + String.fromCharCode(96,96,96);
     assert.equal(parseQwenChangesResponse(fenced).changes[0].path, "src/App.jsx");
@@ -166,6 +186,11 @@ describe("Cohere North patch application", () => {
 });
 
 describe("Cohere North response normalization", () => {
+  it("does not mistake North reasoning fields for the final implementation response", () => {
+    const p = { choices: [{ message: { content: null, reasoning: '{"changes":[{"path":"src/App.jsx","content":"not-final"}]}' } }] };
+    assert.equal(extractCohereResponseText(p), "");
+    assert.equal(parseCohereChangesResponse(p), null);
+  });
   it("parses valid OpenRouter JSON content", () => {
     const p={choices:[{message:{content:'{"changes":[{"path":"src/App.jsx","content":"x"}]}'}}]};
     assert.equal(parseCohereChangesResponse(p).changes[0].path,"src/App.jsx");
