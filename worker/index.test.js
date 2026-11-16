@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import worker, { WORKFLOW_STEP_TIMEOUT, assertWorkflowExecutionSucceeded, finalizeWorkflowAgentStatuses, extractCohereResponseText, extractQwenResponseText, parseQwenChangesResponse, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isDeveloperWritablePath, normalizeAgentAssignments, normalizeGeminiPlan, normalizeWorkflowTeamSettings, parseCohereChangesResponse, normalizeCreatedPullRequest, buildAgentContextText, applyCohereTextEdits, isWorkersAITimeoutError, shouldFallbackQwenToNorth, runWorkersAIWithRetry } from "./core.js";
+import worker, { WORKFLOW_STEP_TIMEOUT, assertWorkflowExecutionSucceeded, finalizeWorkflowAgentStatuses, extractCohereResponseText, extractQwenResponseText, parseQwenChangesResponse, getSessionIdentity, hasAuthProvider, hasTaskSnapshotChanged, isDeveloperWritablePath, normalizeAgentAssignments, normalizeGeminiPlan, normalizeWorkflowTeamSettings, parseCohereChangesResponse, normalizeCreatedPullRequest, buildAgentContextText, applyCohereTextEdits, isWorkersAITimeoutError, shouldFallbackQwenToNorth, shouldFallbackQwenFormatToNorth, runWorkersAIWithRetry } from "./core.js";
 
 const env = {
   APP_PASSWORD: "correct-horse",
@@ -96,6 +96,16 @@ describe("Workers AI timeout recovery", () => {
     assert.equal(shouldFallbackQwenToNorth(timeout, { northEnabled: false, apiKeyAvailable: true }), false);
     assert.equal(shouldFallbackQwenToNorth(timeout, { northEnabled: true, apiKeyAvailable: false }), false);
     assert.equal(shouldFallbackQwenToNorth(ordinary, { northEnabled: true, apiKeyAvailable: true }), false);
+  });
+
+  it("uses North as a fallback after Qwen returns malformed JSON twice, only when North is enabled and configured", () => {
+    const invalidJson = Object.assign(new Error("Qwen дважды вернул ответ без JSON-массива changes."), { code: "QWEN_INVALID_JSON" });
+    const ordinary = new Error("Invalid request");
+    assert.equal(shouldFallbackQwenFormatToNorth(invalidJson, { northEnabled: true, apiKeyAvailable: true }), true);
+    assert.equal(shouldFallbackQwenFormatToNorth(invalidJson, { northEnabled: false, apiKeyAvailable: true }), false);
+    assert.equal(shouldFallbackQwenFormatToNorth(invalidJson, { northEnabled: true, apiKeyAvailable: false }), false);
+    assert.equal(shouldFallbackQwenFormatToNorth(ordinary, { northEnabled: true, apiKeyAvailable: true }), false);
+    assert.equal(shouldFallbackQwenToNorth(invalidJson, { northEnabled: true, apiKeyAvailable: true }), false);
   });
 
   it("retries a Workers AI 3046 and returns the successful response", async () => {
